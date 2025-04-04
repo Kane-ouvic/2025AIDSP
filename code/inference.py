@@ -40,7 +40,7 @@ if __name__ == '__main__':
     model = load_model(MODEL_PATH)
     
     # 指定音樂檔案路徑
-    audio_path = '/home/ouvic/ML/Music_emo/DEAM_audio/MEMD_audio/2000.mp3'
+    audio_path = '../music/3.mp3'
     
     # 預測情緒
     emotion, valence, arousal = predict_emotion(audio_path, model)
