@@ -12,6 +12,7 @@ SAMPLE_RATE = 22050
 MAX_DURATION = 30
 MAX_LEN = SAMPLE_RATE * MAX_DURATION
 N_MELS = 128
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_emotion_label(valence, arousal):
     # 根據 threshold=5 將連續值映射為情緒標籤
@@ -64,8 +65,8 @@ class ImprovedEmotionCNN(nn.Module):
         return self.fc(x)
 
 def load_model(model_path):
-    model = ImprovedEmotionCNN()
-    model.load_state_dict(torch.load(model_path))
+    model = ImprovedEmotionCNN().to(device)  # 加上 .to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))  # 支援 CPU/GPU 都可載入
     model.eval()
     return model
 
