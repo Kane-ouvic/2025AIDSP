@@ -2,7 +2,6 @@ import os
 import torch
 import librosa
 import numpy as np
-from train import ImprovedEmotionCNN, get_emotion_label
 
 # 設定參數
 MODEL_PATH = '../pth/improved_emotion_model.pth'
@@ -10,6 +9,17 @@ SAMPLE_RATE = 22050
 MAX_DURATION = 30
 MAX_LEN = SAMPLE_RATE * MAX_DURATION
 N_MELS = 128
+
+def get_emotion_label(valence, arousal):
+    # 根據 threshold=5 將連續值映射為情緒標籤
+    if valence >= 5 and arousal >= 5:
+        return "Happy"
+    elif valence >= 5 and arousal < 5:
+        return "Peaceful"
+    elif valence < 5 and arousal >= 5:
+        return "Tense"
+    else:
+        return "Sad"
 
 class ImprovedEmotionCNN(nn.Module):
     def __init__(self):
