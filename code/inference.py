@@ -79,13 +79,15 @@ def predict_emotion(audio_path, model):
     mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=N_MELS)
     mel_db = librosa.power_to_db(mel, ref=np.max)
     mel_db = torch.tensor(mel_db, dtype=torch.float32)
+    
     mel_db = (mel_db - mel_db.mean()) / mel_db.std()
-    mel_db = mel_db.unsqueeze(0).unsqueeze(0)  # [1, 1, N_MELS, T]
+    mel_db = mel_db.unsqueeze(0).unsqueeze(0).to(device)  # [1, 1, N_MELS, T]
 
     # 預測
     with torch.no_grad():
         pred = model(mel_db)
-        valence, arousal = pred[0].numpy()
+        # valence, arousal = pred[0].numpy()
+        valence, arousal = pred[0].cpu().numpy()
         emotion_label = get_emotion_label(valence, arousal)
     
     return emotion_label, valence, arousal
