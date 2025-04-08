@@ -90,7 +90,9 @@ class EmotionRecognizerGUI(QWidget):
         self.rec_thread.result_signal.connect(self.update_label)
         self.rec_thread.start()
             
-    
+    def update_label(self, text):
+        self.label.setText(text)
+        
     def open_audio_file(self):
         file_name, _ = QFileDialog.getOpenFileName(
             self, "選擇音樂檔案", "", "音訊檔案 (*.wav *.mp3 *.flac)"
