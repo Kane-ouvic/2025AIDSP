@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QLabel, QMessageBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QThread, pyqtSignal
 
 from code import inference as inf
 #### #################################################
@@ -17,6 +18,24 @@ from torch.utils.data import Dataset, DataLoader
 #### #################################################
 import sounddevice as sd
 import time
+class RecognizeThread(QThread):
+    result_signal = pyqtSignal(str)
+
+    def __init__(self, model, sample_rate, record_fn, predict_fn):
+        super().__init__()
+        self.model = model
+        self.sample_rate = sample_rate
+        self.record_fn = record_fn
+        self.predict_fn = predict_fn
+
+    def run(self):
+        for i in range(4):
+            clip = self.record_fn()
+            buffer = clip[:, 0]  # 取左聲道
+            emotion, valence, arousal = self.predict_fn(buffer, self.model)
+            msg = f"預測情緒: {emotion}\nValence: {valence:.2f}, Arousal: {arousal:.2f}"
+            self.result_signal.emit(msg)
+            time.sleep(2)
 
 class EmotionRecognizerGUI(QWidget):
     MODEL_PATH = './pth/improved_emotion_model.pth'
@@ -60,24 +79,17 @@ class EmotionRecognizerGUI(QWidget):
         sd.wait()
         return audio
     def realtime_recognize(self):
-        # TODO: 加入錄音功能
-        # QMessageBox.information(self, "錄音", "錄音功能尚未實作。")
+        self.label.setText("🎙️ 即興辨識中...")
         model = inf.load_model(self.MODEL_PATH)
-        try:
-            self.label.setText("聆聽中~~")
-            time.sleep(1)
-            for i in range(4):
-                clip = self.record_clip()
-                time.sleep(1)
-                buffer = clip[0] # buffer
-                emotion, valence, arousal = self.predict_emotion(buffer, model)
-                msg = f"The predicted emotion for the audio file is: {emotion}" + '\n' + \
-                      f"Valence: {valence}, Arousal: {arousal}"
-                self.label.setText(msg)
-                time.sleep(2)
-        except KeyboardInterrupt:
-            print("\n🛑 停止錄音")
-        
+        self.rec_thread = RecognizeThread(
+            model=model,
+            sample_rate=self.SAMPLE_RATE,
+            record_fn=self.record_clip,
+            predict_fn=self.predict_emotion
+        )
+        self.rec_thread.result_signal.connect(self.update_label)
+        self.rec_thread.start()
+            
     
     def open_audio_file(self):
         file_name, _ = QFileDialog.getOpenFileName(
