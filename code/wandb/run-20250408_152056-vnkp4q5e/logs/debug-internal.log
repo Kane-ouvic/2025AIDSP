@@ -1,0 +1,15 @@
+{"time":"2025-04-08T15:20:56.856297701+08:00","level":"INFO","msg":"stream: starting","core version":"0.19.9","symlink path":"/home/ouvic/ML/Music_emo/2025AIDSP/code/wandb/run-20250408_152056-vnkp4q5e/logs/debug-core.log"}
+{"time":"2025-04-08T15:20:57.187117013+08:00","level":"INFO","msg":"created new stream","id":"vnkp4q5e"}
+{"time":"2025-04-08T15:20:57.187283163+08:00","level":"INFO","msg":"stream: started","id":"vnkp4q5e"}
+{"time":"2025-04-08T15:20:57.187387248+08:00","level":"INFO","msg":"writer: Do: started","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T15:20:57.18740926+08:00","level":"INFO","msg":"sender: started","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T15:20:57.187508879+08:00","level":"INFO","msg":"handler: started","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T15:20:57.480920664+08:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-08T16:25:52.669447292+08:00","level":"INFO","msg":"stream: closing","id":"vnkp4q5e"}
+{"time":"2025-04-08T16:25:52.669510921+08:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-08T16:25:52.669623563+08:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-08T16:25:53.497201616+08:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-08T16:25:53.905814244+08:00","level":"INFO","msg":"handler: closed","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T16:25:53.905879593+08:00","level":"INFO","msg":"writer: Close: closed","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T16:25:53.905958422+08:00","level":"INFO","msg":"sender: closed","stream_id":"vnkp4q5e"}
+{"time":"2025-04-08T16:25:53.906028381+08:00","level":"INFO","msg":"stream: closed","id":"vnkp4q5e"}
