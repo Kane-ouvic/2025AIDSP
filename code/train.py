@@ -14,7 +14,7 @@ from sklearn.metrics import confusion_matrix
 # 初始化 wandb 專案
 wandb.init(project="music_emotion_deam", config={
     "epochs": 30,
-    "batch_size": 16,
+    "batch_size": 8,
     "learning_rate": 1e-3,
     "sample_rate": 22050,
     "max_duration": 30,
@@ -247,8 +247,8 @@ def train():
         wandb.log({"Val Loss": val_loss, "Val Accuracy": accuracy, "Epoch": epoch+1})
         print(f"Epoch {epoch+1} Val Loss: {val_loss:.4f} - Val Accuracy: {accuracy:.4f}")
 
-    torch.save(model.state_dict(), 'emotion_crnn_model.pth')
-    print("模型已儲存為 emotion_crnn_model.pth")
+    torch.save(model.state_dict(), 'emotion_crnn_model_0408.pth')
+    print("模型已儲存為 emotion_crnn_model_0408.pth")
     
     # 繪製混淆矩陣
     model.eval()
