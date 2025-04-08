@@ -7,6 +7,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from code import inference as inf
+from code import models as mdls
 #### #################################################
 import os
 import torch
@@ -38,12 +39,14 @@ class RecognizeThread(QThread):
             time.sleep(2)
 
 class EmotionRecognizerGUI(QWidget):
-    MODEL_PATH = './pth/improved_emotion_model.pth'
+    MODEL_PATH = './pth/emotion_crnn_model.pth'
     SAMPLE_RATE = inf.SAMPLE_RATE
     MAX_DURATION = inf.MAX_DURATION
     MAX_LEN = SAMPLE_RATE * MAX_DURATION
     N_MELS = inf.N_MELS
     device = inf.device
+    model = mdls.EmotionCRNN().to(device)  # 加上 .to(device)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("音樂情緒辨識")
@@ -73,6 +76,10 @@ class EmotionRecognizerGUI(QWidget):
         layout.addWidget(self.recognize_button)
 
         self.setLayout(layout)
+    def load_model(self, model_path):
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))  # 支援 CPU/GPU 都可載入
+        self.model.eval()
+        return self.model
 
     def record_clip(self):
         audio = sd.rec(int(15 * self.SAMPLE_RATE), samplerate=self.SAMPLE_RATE, channels=2, dtype='float32')
@@ -80,7 +87,7 @@ class EmotionRecognizerGUI(QWidget):
         return audio
     def realtime_recognize(self):
         self.label.setText("🎙️ 即興辨識中...")
-        model = inf.load_model(self.MODEL_PATH)
+        model = self.load_model(self.MODEL_PATH)
         self.rec_thread = RecognizeThread(
             model=model,
             sample_rate=self.SAMPLE_RATE,
@@ -111,7 +118,7 @@ class EmotionRecognizerGUI(QWidget):
         # self.audio_file_path 是選擇的音訊檔案路徑
         self.label.setText("辨識中")
         
-        model = inf.load_model(self.MODEL_PATH)
+        model = self.load_model(self.MODEL_PATH)
         emotion, valence, arousal = self.predict_emotion(self.audio, model)
         msg = f"The predicted emotion for the audio file is: {emotion}" + '\n' + \
               f"Valence: {valence}, Arousal: {arousal}"
