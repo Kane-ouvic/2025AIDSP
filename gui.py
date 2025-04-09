@@ -30,14 +30,21 @@ class RecognizeThread(QThread):
         self.predict_fn = predict_fn
 
     def run(self):
-        for i in range(4):
+        buffer = np.zeros(3 * self.sample_rate *5)
+        for i in range(5):
             clip = self.record_fn()
-            buffer = clip[:, 0]  # 取左聲道
+            print(type(clip))
+            buffer[i * 3 * self.sample_rate: 3 * self.sample_rate * (i+1)] = clip[:, 0]  # 取左聲道
+        for i in range(15):
             emotion, valence, arousal = self.predict_fn(buffer, self.model)
             msg = f"預測情緒: {emotion}\nValence: {valence:.2f}, Arousal: {arousal:.2f}"
             self.result_signal.emit(msg)
+            clip = self.record_fn()
+            buffer[0:-len(clip)-1] = buffer[len(clip):-1]
+            buffer[-len(clip)-1:-1] = clip[:, 0]
             time.sleep(2)
-
+        msg = f"預測情緒: {emotion}\nValence: {valence:.2f}, Arousal: {arousal:.2f}\nEND"
+        self.result_signal.emit(msg)
 class EmotionRecognizerGUI(QWidget):
     MODEL_PATH = './pth/emotion_crnn_model.pth'
     SAMPLE_RATE = inf.SAMPLE_RATE
@@ -82,7 +89,7 @@ class EmotionRecognizerGUI(QWidget):
         return self.model
 
     def record_clip(self):
-        audio = sd.rec(int(15 * self.SAMPLE_RATE), samplerate=self.SAMPLE_RATE, channels=2, dtype='float32')
+        audio = sd.rec(int(3 * self.SAMPLE_RATE), samplerate=self.SAMPLE_RATE, channels=2, dtype='float32')
         sd.wait()
         return audio
     def realtime_recognize(self):
