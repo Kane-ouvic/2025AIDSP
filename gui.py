@@ -19,6 +19,8 @@ from torch.utils.data import Dataset, DataLoader
 #### #################################################
 import sounddevice as sd
 import time
+import pyaudio
+
 class RecognizeThread(QThread):
     result_signal = pyqtSignal(str)
 
@@ -30,11 +32,14 @@ class RecognizeThread(QThread):
         self.predict_fn = predict_fn
 
     def run(self):
-        buffer = np.zeros(3 * self.sample_rate *5)
-        for i in range(5):
+        buf_len = 10
+        clip = self.record_fn()
+        length = len(clip)
+        buffer = np.zeros(length *buf_len)
+        for i in range(1, buf_len):
             clip = self.record_fn()
-            print(type(clip))
-            buffer[i * 3 * self.sample_rate: 3 * self.sample_rate * (i+1)] = clip[:, 0]  # 取左聲道
+            print(f"{i} clip stored...")
+            buffer[i * length: length * (i+1)] = clip[:, 0]  # 取左聲道
         for i in range(15):
             emotion, valence, arousal = self.predict_fn(buffer, self.model)
             msg = f"預測情緒: {emotion}\nValence: {valence:.2f}, Arousal: {arousal:.2f}"
@@ -42,7 +47,7 @@ class RecognizeThread(QThread):
             clip = self.record_fn()
             buffer[0:-len(clip)-1] = buffer[len(clip):-1]
             buffer[-len(clip)-1:-1] = clip[:, 0]
-            time.sleep(2)
+            time.sleep(1)
         msg = f"預測情緒: {emotion}\nValence: {valence:.2f}, Arousal: {arousal:.2f}\nEND"
         self.result_signal.emit(msg)
 class EmotionRecognizerGUI(QWidget):
@@ -92,13 +97,44 @@ class EmotionRecognizerGUI(QWidget):
         audio = sd.rec(int(3 * self.SAMPLE_RATE), samplerate=self.SAMPLE_RATE, channels=2, dtype='float32')
         sd.wait()
         return audio
+    def record_clip_pyaudio(self, duration=3, sample_rate=16000, channels=1):
+        CHUNK = 1024
+        FORMAT = pyaudio.paFloat32
+        p = pyaudio.PyAudio()
+
+        stream = p.open(format=FORMAT,
+                        channels=channels,
+                        rate=sample_rate,
+                        input=True,
+                        frames_per_buffer=CHUNK)
+
+        print("🎙️ Recording...")
+        frames = []
+        for _ in range(0, int(sample_rate / CHUNK * duration)):
+            data = stream.read(CHUNK)
+            frames.append(np.frombuffer(data, dtype=np.float32))
+        print("🛑 Done.")
+
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+        audio = np.hstack(frames)
+        if channels == 2:
+            audio = audio.reshape(-1, 2)
+        else:
+            audio = audio.reshape(-1, 1)
+
+        return audio
+
     def realtime_recognize(self):
         self.label.setText("🎙️ 即興辨識中...")
         model = self.load_model(self.MODEL_PATH)
         self.rec_thread = RecognizeThread(
             model=model,
             sample_rate=self.SAMPLE_RATE,
-            record_fn=self.record_clip,
+            #record_fn=self.record_clip,
+            record_fn = lambda: self.record_clip_pyaudio(duration=3, sample_rate=self.SAMPLE_RATE, channels=2),
             predict_fn=self.predict_emotion
         )
         self.rec_thread.result_signal.connect(self.update_label)
