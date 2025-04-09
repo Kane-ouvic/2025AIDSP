@@ -20,6 +20,8 @@ from torch.utils.data import Dataset, DataLoader
 import sounddevice as sd
 import time
 import pyaudio
+import librosa.display
+import matplotlib.pyplot as plt
 
 class RecognizeThread(QThread):
     result_signal = pyqtSignal(str)
@@ -151,7 +153,7 @@ class EmotionRecognizerGUI(QWidget):
             self.audio_file_path = file_name
             self.label.setText(f"已選擇：{file_name.split('/')[-1]}")
             self.audio, sr = librosa.load(self.audio_file_path, sr=self.SAMPLE_RATE)
-            
+            self.plot_MFCC(self.audio, sr)
     def recognize_emotion(self):
         if not self.audio_file_path:
             QMessageBox.warning(self, "錯誤", "請先開啟音樂檔案或錄音")
@@ -187,6 +189,17 @@ class EmotionRecognizerGUI(QWidget):
             emotion_label = inf.get_emotion_label(valence, arousal)
         
         return emotion_label, valence, arousal
+
+    def plot_MFCC(self, audio, sr):
+        mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)  # 通常取前13維
+
+        # 繪圖
+        plt.figure(figsize=(10, 4))
+        librosa.display.specshow(mfcc, x_axis='time')
+        plt.colorbar()
+        plt.title('MFCC')
+        plt.tight_layout()
+        plt.show()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
