@@ -3,16 +3,13 @@ from discord.ext import commands
 import os
 from discord import FFmpegPCMAudio
 import asyncio
-from talk import init_model, generate_response
 import concurrent.futures
 import yt_dlp
 import re
+import threading
 
 # 設定 bot 指令前綴
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-
-# 初始化 AI 模型
-tokenizer, model = init_model()
 
 # 創建線程池
 executor = concurrent.futures.ThreadPoolExecutor()
@@ -20,7 +17,9 @@ executor = concurrent.futures.ThreadPoolExecutor()
 # 自動控制相關變數
 AUTO_CONTROL = False
 TARGET_CHANNEL_ID = 0  # 要加入的語音頻道ID
-MUSIC_FILE = "3.mp3"  # 要播放的音樂檔案
+MUSIC_FILE = None  # 要播放的音樂檔案
+BOT_TOKEN = None  # Discord Bot Token
+bot_thread = None  # 用於存儲 bot 運行的線程
 
 # YouTube下載選項
 ydl_opts = {
@@ -39,80 +38,6 @@ async def on_ready():
     if AUTO_CONTROL:
         await auto_control()
 
-# 處理非指令消息
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-        
-    # 如果消息不是以 ! 開頭，就當作是問問題
-    if not message.content.startswith('!'):
-        try:
-            # 顯示正在處理的訊息
-            processing_msg = await message.channel.send("正在思考中...")
-            
-            # 在線程池中執行 AI 回應生成
-            loop = asyncio.get_event_loop()
-            try:
-                response = await loop.run_in_executor(
-                    executor,
-                    generate_response,
-                    message.content,
-                    tokenizer,
-                    model
-                )
-            except Exception as e:
-                await message.channel.send(f"生成回應時發生錯誤: {str(e)}")
-                return
-            
-            # 如果回應太長，分割成多個訊息
-            if len(response) > 2000:
-                chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
-                for chunk in chunks:
-                    await message.channel.send(chunk)
-            else:
-                await message.channel.send(response)
-                
-            # 刪除處理中的訊息
-            await processing_msg.delete()
-            
-        except Exception as e:
-            await message.channel.send(f"發生錯誤: {str(e)}")
-    
-    # 處理其他指令
-    await bot.process_commands(message)
-
-# AI 對話指令
-@bot.command()
-async def ask(ctx, *, question):
-    try:
-        # 顯示正在處理的訊息
-        processing_msg = await ctx.send("正在思考中...")
-        
-        # 在線程池中執行 AI 回應生成
-        loop = asyncio.get_event_loop()
-        try:
-            response = await loop.run_in_executor(
-                executor,
-                generate_response,
-                question,
-                tokenizer,
-                model
-            )
-        except Exception as e:
-            await ctx.send(f"生成回應時發生錯誤: {str(e)}")
-            await processing_msg.delete()
-            return
-            
-        # 刪除處理中的訊息
-        await processing_msg.delete()
-        
-        # 將完整回應一次發送
-        await ctx.send(response)
-        
-    except Exception as e:
-        await ctx.send(f"發生錯誤: {str(e)}")
-
 async def auto_control():
     """自動控制機器人行為"""
     try:
@@ -122,23 +47,38 @@ async def auto_control():
             print(f"找不到頻道 {TARGET_CHANNEL_ID}")
             return
 
+        # 如果已經在語音頻道中，先離開
+        for vc in bot.voice_clients:
+            if vc.guild == channel.guild:
+                await vc.disconnect()
+
         # 加入頻道
         voice_client = await channel.connect()
         print(f"已加入頻道 {channel.name}")
 
         # 播放音樂
         if MUSIC_FILE:
-            source = FFmpegPCMAudio(f'../music/{MUSIC_FILE}')
-            voice_client.play(source)
-            print(f"開始播放 {MUSIC_FILE}")
+            try:
+                # 檢查音樂文件是否存在
+                music_path = os.path.join('music', MUSIC_FILE)
+                if not os.path.exists(music_path):
+                    print(f"找不到音樂文件: {music_path}")
+                    return
 
-            # 等待音樂播放完成
-            while voice_client.is_playing():
-                await asyncio.sleep(1)
+                source = FFmpegPCMAudio(music_path)
+                voice_client.play(source)
+                print(f"開始播放 {MUSIC_FILE}")
 
-        # 離開頻道
-        await voice_client.disconnect()
-        print("已離開頻道")
+                # 等待音樂播放完成
+                while voice_client.is_playing():
+                    await asyncio.sleep(1)
+
+            except Exception as e:
+                print(f"播放音樂時發生錯誤: {str(e)}")
+            finally:
+                # 離開頻道
+                await voice_client.disconnect()
+                print("已離開頻道")
 
     except Exception as e:
         print(f"自動控制發生錯誤: {str(e)}")
@@ -150,6 +90,10 @@ def setup_auto_control(channel_id, music_file=None):
     AUTO_CONTROL = True
     TARGET_CHANNEL_ID = channel_id
     MUSIC_FILE = music_file
+    # 如果 bot 已經在運行，立即執行 auto_control
+    if bot.is_ready():
+        asyncio.run_coroutine_threadsafe(auto_control(), bot.loop)
+    print(f"已設置自動控制 - 頻道: {channel_id}, 音樂: {music_file}")
 
 # 加入語音頻道指令
 @bot.command()
@@ -228,11 +172,39 @@ async def stop(ctx):
     else:
         await ctx.send('目前沒有正在播放的音樂')
 
+def run_bot():
+    """在新線程中運行 bot"""
+    if not BOT_TOKEN:
+        print("錯誤：未設置 Bot Token")
+        return
+    try:
+        bot.run(BOT_TOKEN)
+    except Exception as e:
+        print(f"Bot 運行出錯: {str(e)}")
+
+def start_bot(token):
+    """啟動 Discord Bot"""
+    global BOT_TOKEN, bot_thread
+    BOT_TOKEN = token
+    if bot_thread is None or not bot_thread.is_alive():
+        bot_thread = threading.Thread(target=run_bot)
+        bot_thread.daemon = True  # 設置為守護線程
+        bot_thread.start()
+        return True
+    return False
+
+def stop_bot():
+    """停止 Discord Bot"""
+    global bot_thread, AUTO_CONTROL
+    AUTO_CONTROL = False  # 停止自動控制
+    if bot_thread and bot_thread.is_alive():
+        asyncio.run_coroutine_threadsafe(bot.close(), bot.loop)
+        bot_thread.join(timeout=5)  # 等待線程結束
+        bot_thread = None
+        return True
+    return False
+
 # 執行 bot
 if __name__ == "__main__":
-    # 設定自動控制參數
-    # 替換成您的頻道ID和音樂檔案名稱
-    # setup_auto_control(851380042117283860, "3.mp3")  # 替換成實際的頻道ID和音樂檔案
-    
-    # 啟動機器人
-    bot.run('')
+    TOKEN = 'YOUR_BOT_TOKEN_HERE'  # 請替換成您的 Discord Bot Token
+    start_bot(TOKEN)

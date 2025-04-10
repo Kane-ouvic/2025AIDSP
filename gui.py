@@ -89,7 +89,44 @@ class EmotionRecognizerGUI(QWidget):
         self.recognize_button.clicked.connect(self.recognize_emotion)
         layout.addWidget(self.recognize_button)
 
+        # 添加 Discord Bot 控制按鈕
+        self.discord_bot_button = QPushButton("啟動 Discord Bot", self)
+        self.discord_bot_button.clicked.connect(self.toggle_discord_bot)
+        layout.addWidget(self.discord_bot_button)
+
+        self.discord_play_button = QPushButton("在 Discord 播放", self)
+        self.discord_play_button.clicked.connect(self.play_in_discord)
+        self.discord_play_button.setEnabled(False)  # 初始時禁用
+        layout.addWidget(self.discord_play_button)
+
         self.setLayout(layout)
+
+    def toggle_discord_bot(self):
+        try:
+            from bot import start_bot, stop_bot
+            
+            if self.discord_bot_button.text() == "啟動 Discord Bot":
+                # 啟動 bot
+                TOKEN = ''  # 請替換成您的 Discord Bot Token
+                if start_bot(TOKEN):
+                    self.discord_bot_button.setText("關閉 Discord Bot")
+                    self.discord_play_button.setEnabled(True)
+                    QMessageBox.information(self, "成功", "Discord Bot 已啟動")
+                else:
+                    QMessageBox.warning(self, "警告", "Discord Bot 已在運行中")
+            else:
+                # 關閉 bot
+                if stop_bot():
+                    self.discord_bot_button.setText("啟動 Discord Bot")
+                    self.discord_play_button.setEnabled(False)
+                    QMessageBox.information(self, "成功", "Discord Bot 已關閉")
+                else:
+                    QMessageBox.warning(self, "警告", "Discord Bot 未在運行")
+        except ImportError as e:
+            QMessageBox.critical(self, "錯誤", f"無法載入 Discord Bot 模組: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"操作失敗: {str(e)}")
+
     def load_model(self, model_path):
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))  # 支援 CPU/GPU 都可載入
         self.model.eval()
@@ -200,6 +237,53 @@ class EmotionRecognizerGUI(QWidget):
         plt.title('MFCC')
         plt.tight_layout()
         plt.show()
+
+    def play_in_discord(self):
+        if not self.audio_file_path:
+            QMessageBox.warning(self, "錯誤", "請先開啟音樂檔案")
+            return
+            
+        try:
+            # 複製音樂檔案到 Discord bot 的音樂目錄
+            import shutil
+            import os
+            import sys
+            
+            # 獲取當前文件的目錄
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # 確保 music 目錄存在
+            music_dir = os.path.join(current_dir, 'music')
+            if not os.path.exists(music_dir):
+                os.makedirs(music_dir)
+                
+            # 複製檔案
+            file_name = os.path.basename(self.audio_file_path)
+            target_path = os.path.join(music_dir, file_name)
+            
+            # 檢查源文件和目標文件是否相同
+            if os.path.normpath(self.audio_file_path) != os.path.normpath(target_path):
+                shutil.copy2(self.audio_file_path, target_path)
+            
+            # 設定自動控制參數
+            try:
+                from bot import setup_auto_control
+                # 使用您的 Discord 頻道 ID
+                channel_id = 851380042117283860  # 請替換成您的頻道ID
+                setup_auto_control(channel_id, file_name)
+                
+                # 等待一下確保設置生效
+                import time
+                time.sleep(2)
+                
+                QMessageBox.information(self, "成功", f"已設定在 Discord 播放 {file_name}\n請檢查 Discord 頻道是否有音樂播放")
+            except ImportError as e:
+                QMessageBox.critical(self, "錯誤", f"無法載入 Discord Bot 模組: {str(e)}\n請確保已安裝 discord.py 並設置了 Bot Token")
+            except Exception as e:
+                QMessageBox.critical(self, "錯誤", f"設定 Discord Bot 失敗: {str(e)}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"播放設定失敗: {str(e)}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
