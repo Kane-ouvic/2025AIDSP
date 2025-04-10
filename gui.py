@@ -22,6 +22,7 @@ import time
 import pyaudio
 import librosa.display
 import matplotlib.pyplot as plt
+from deepseek.llm_test import call_llm_api
 
 class RecognizeThread(QThread):
     result_signal = pyqtSignal(str)
@@ -68,6 +69,7 @@ class EmotionRecognizerGUI(QWidget):
 
         self.audio_file_path = None
         self.audio = None
+        self.current_emotion = None
         self.init_ui()
 
     def init_ui(self):
@@ -89,6 +91,11 @@ class EmotionRecognizerGUI(QWidget):
         self.recognize_button.clicked.connect(self.recognize_emotion)
         layout.addWidget(self.recognize_button)
 
+        # 添加生成詩詞按鈕
+        self.generate_poem_button = QPushButton("根據情緒生成詩詞", self)
+        self.generate_poem_button.clicked.connect(self.generate_and_display_poem)
+        layout.addWidget(self.generate_poem_button)
+
         # 添加 Discord Bot 控制按鈕
         self.discord_bot_button = QPushButton("啟動 Discord Bot", self)
         self.discord_bot_button.clicked.connect(self.toggle_discord_bot)
@@ -100,6 +107,29 @@ class EmotionRecognizerGUI(QWidget):
         layout.addWidget(self.discord_play_button)
 
         self.setLayout(layout)
+
+    def generate_and_display_poem(self):
+        if not self.current_emotion:
+            QMessageBox.warning(self, "警告", "請先進行情緒辨識")
+            return
+            
+        try:
+            # 生成提示詞
+            prompt = f"根據{self.current_emotion}這個情緒，寫一首詩，20字以內。"
+            
+            # 呼叫 LLM API
+            poem = call_llm_api(prompt)
+            
+            # 顯示在 Discord 中
+            try:
+                from bot import send_message_to_channel
+                message = f"根據當前情緒 [{self.current_emotion}] 生成的詩:\n{poem}"
+                QMessageBox.information(self, "成功", f"詩詞已生成:\n{poem}")
+            except Exception as e:
+                QMessageBox.warning(self, "警告", f"無法發送到 Discord: {str(e)}\n生成的詩詞:\n{poem}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"生成詩詞時發生錯誤: {str(e)}")
 
     def toggle_discord_bot(self):
         try:
@@ -181,6 +211,9 @@ class EmotionRecognizerGUI(QWidget):
             
     def update_label(self, text):
         self.label.setText(text)
+        # 更新當前情緒
+        if "預測情緒:" in text:
+            self.current_emotion = text.split("預測情緒:")[1].split("\n")[0].strip()
         
     def open_audio_file(self):
         file_name, _ = QFileDialog.getOpenFileName(
@@ -202,6 +235,7 @@ class EmotionRecognizerGUI(QWidget):
         
         model = self.load_model(self.MODEL_PATH)
         emotion, valence, arousal = self.predict_emotion(self.audio, model)
+        self.current_emotion = emotion
         msg = f"The predicted emotion for the audio file is: {emotion}" + '\n' + \
               f"Valence: {valence}, Arousal: {arousal}"
         self.label.setText("辨識完成")

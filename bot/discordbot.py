@@ -204,6 +204,20 @@ def stop_bot():
         return True
     return False
 
+async def send_message_to_channel(channel_id, message):
+    """向指定頻道發送消息"""
+    try:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            await channel.send(message)
+            return True
+        else:
+            print(f"找不到頻道 {channel_id}")
+            return False
+    except Exception as e:
+        print(f"發送消息時發生錯誤: {str(e)}")
+        return False
+
 # 執行 bot
 if __name__ == "__main__":
     TOKEN = 'YOUR_BOT_TOKEN_HERE'  # 請替換成您的 Discord Bot Token

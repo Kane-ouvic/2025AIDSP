@@ -1,1 +1,1 @@
-from .discordbot import setup_auto_control, start_bot, stop_bot 
+from .discordbot import setup_auto_control, start_bot, stop_bot, send_message_to_channel 
