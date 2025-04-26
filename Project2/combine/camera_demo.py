@@ -83,6 +83,7 @@ def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 	key = 0
 	idx = 0
 	style_idx = 0
+	last_gesture = None
 	while True:
 		# read frame
 		ret_val, img = cam.read()
@@ -113,6 +114,18 @@ def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 					
 					# 顯示手部關鍵點
 					mp.solutions.drawing_utils.draw_landmarks(cimg, landmarks, mp_hands.HAND_CONNECTIONS)
+					
+					# 根據手勢切換風格
+					if confidence > 0.8:
+						if label != last_gesture:  # 只有當手勢改變時才切換
+							if label == "Good":
+								style_idx = (style_idx - 1) % style_loader.size()
+								last_gesture = label
+							elif label == "Bad":
+								style_idx = (style_idx + 1) % style_loader.size()
+								last_gesture = label
+			else:
+				last_gesture = None  # 當沒有檢測到手時重置上一次的手勢
 
 		# 人像分割
 		if segment_human:
