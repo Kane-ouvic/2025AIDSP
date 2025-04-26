@@ -6,8 +6,9 @@ from torch.autograd import Variable
 import mediapipe as mp
 import joblib
 from ultralytics import YOLO
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox, QDialog
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, 
+                            QWidget, QCheckBox, QDialog, QFrame, QGroupBox, QSlider, QStyleFactory)
+from PyQt5.QtGui import QImage, QPixmap, QFont, QIcon, QPalette, QColor
 from PyQt5.QtCore import QTimer, Qt, pyqtSlot
 import sys
 
@@ -44,10 +45,32 @@ class VideoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('即時影像')
         self.setGeometry(100, 100, 1200, 700)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+            }
+            QLabel {
+                border: 2px solid #3F3F46;
+                border-radius: 8px;
+                background-color: #1E1E1E;
+                padding: 5px;
+            }
+        """)
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        title_label = QLabel('風格轉換即時影像')
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setFont(QFont('微軟正黑體', 14, QFont.Bold))
+        title_label.setStyleSheet("border: none; color: #FFFFFF; padding: 10px;")
+        layout.addWidget(title_label)
+        
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(800, 500)
         layout.addWidget(self.image_label)
         
         self.setLayout(layout)
@@ -57,10 +80,32 @@ class StreamDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('串流影像')
         self.setGeometry(100, 100, 800, 600)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+            }
+            QLabel {
+                border: 2px solid #3F3F46;
+                border-radius: 8px;
+                background-color: #1E1E1E;
+                padding: 5px;
+            }
+        """)
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        title_label = QLabel('即時串流影像')
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setFont(QFont('微軟正黑體', 14, QFont.Bold))
+        title_label.setStyleSheet("border: none; color: #FFFFFF; padding: 10px;")
+        layout.addWidget(title_label)
+        
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(700, 400)
         layout.addWidget(self.image_label)
         
         self.setLayout(layout)
@@ -126,68 +171,161 @@ class StyleTransferApp(QMainWindow):
         self.stream_dialog = StreamDialog(self)
         
     def initUI(self):
-        self.setWindowTitle('風格轉換即時演示')
-        self.setGeometry(100, 100, 500, 300)
+        self.setWindowTitle('風格轉換即時演示系統')
+        self.setGeometry(100, 100, 600, 400)
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2D2D30;
+            }
+            QWidget {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                font-family: '微軟正黑體';
+            }
+            QPushButton {
+                background-color: #0078D7;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1C97EA;
+            }
+            QPushButton:pressed {
+                background-color: #00559B;
+            }
+            QCheckBox {
+                spacing: 8px;
+                font-size: 14px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+            }
+            QGroupBox {
+                border: 2px solid #3F3F46;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 15px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 5px;
+            }
+        """)
         
         # 主佈局
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # 標題
+        title_label = QLabel('風格轉換即時演示系統')
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setFont(QFont('微軟正黑體', 18, QFont.Bold))
+        title_label.setStyleSheet("color: #FFFFFF; padding: 10px;")
+        main_layout.addWidget(title_label)
         
         # 控制按鈕區域
+        control_group = QGroupBox('控制面板')
         control_layout = QHBoxLayout()
+        control_layout.setSpacing(15)
         
         # 開始/停止按鈕
         self.start_button = QPushButton('開始')
+        self.start_button.setMinimumHeight(40)
+        self.start_button.setIcon(QIcon('icons/play.png'))
         self.start_button.clicked.connect(self.toggleCamera)
         control_layout.addWidget(self.start_button)
         
         # 串流按鈕
         self.stream_button = QPushButton('開啟串流')
+        self.stream_button.setMinimumHeight(40)
+        self.stream_button.setIcon(QIcon('icons/stream.png'))
         self.stream_button.clicked.connect(self.toggleStream)
         control_layout.addWidget(self.stream_button)
         
+        control_group.setLayout(control_layout)
+        main_layout.addWidget(control_group)
+        
         # 功能開關區域
-        toggle_layout = QHBoxLayout()
+        toggle_group = QGroupBox('功能設定')
+        toggle_layout = QVBoxLayout()
+        
+        # 功能開關子區域
+        features_layout = QHBoxLayout()
+        features_layout.setSpacing(10)
         
         # 人像分割開關
         self.segment_checkbox = QCheckBox('人像分割')
         self.segment_checkbox.setChecked(self.segment_human)
         self.segment_checkbox.stateChanged.connect(self.toggleSegment)
-        toggle_layout.addWidget(self.segment_checkbox)
+        features_layout.addWidget(self.segment_checkbox)
         
         # 手勢辨識開關
         self.gesture_checkbox = QCheckBox('手勢辨識')
         self.gesture_checkbox.setChecked(self.detect_gesture)
         self.gesture_checkbox.stateChanged.connect(self.toggleGesture)
-        toggle_layout.addWidget(self.gesture_checkbox)
+        features_layout.addWidget(self.gesture_checkbox)
         
         # 人數計數開關
         self.person_checkbox = QCheckBox('人數計數')
         self.person_checkbox.setChecked(self.detect_person)
         self.person_checkbox.stateChanged.connect(self.togglePerson)
-        toggle_layout.addWidget(self.person_checkbox)
+        features_layout.addWidget(self.person_checkbox)
+        
+        toggle_layout.addLayout(features_layout)
+        
+        # 風格切換區域
+        style_layout = QHBoxLayout()
+        style_layout.setSpacing(10)
+        
+        style_label = QLabel('風格選擇:')
+        style_layout.addWidget(style_label)
         
         # 風格切換按鈕
         self.prev_style_button = QPushButton('上一個風格')
+        self.prev_style_button.setIcon(QIcon('icons/prev.png'))
         self.prev_style_button.clicked.connect(self.prevStyle)
-        toggle_layout.addWidget(self.prev_style_button)
+        style_layout.addWidget(self.prev_style_button)
         
         self.next_style_button = QPushButton('下一個風格')
+        self.next_style_button.setIcon(QIcon('icons/next.png'))
         self.next_style_button.clicked.connect(self.nextStyle)
-        toggle_layout.addWidget(self.next_style_button)
+        style_layout.addWidget(self.next_style_button)
+        
+        toggle_layout.addLayout(style_layout)
+        toggle_group.setLayout(toggle_layout)
+        main_layout.addWidget(toggle_group)
         
         # 狀態顯示區域
-        status_layout = QHBoxLayout()
+        status_group = QGroupBox('系統狀態')
+        status_layout = QVBoxLayout()
+        
         self.segment_status = QLabel('人像分割: 關閉')
-        self.gesture_status = QLabel('手勢辨識: 關閉')
-        self.person_status = QLabel('人數計數: 關閉')
+        self.segment_status.setStyleSheet("color: #FF9800;")
         status_layout.addWidget(self.segment_status)
+        
+        self.gesture_status = QLabel('手勢辨識: 關閉')
+        self.gesture_status.setStyleSheet("color: #4CAF50;")
         status_layout.addWidget(self.gesture_status)
+        
+        self.person_status = QLabel('人數計數: 關閉')
+        self.person_status.setStyleSheet("color: #2196F3;")
         status_layout.addWidget(self.person_status)
         
-        # 將所有佈局添加到主佈局
-        main_layout.addLayout(control_layout)
-        main_layout.addLayout(toggle_layout)
-        main_layout.addLayout(status_layout)
+        status_group.setLayout(status_layout)
+        main_layout.addWidget(status_group)
         
         # 設置主窗口的中央部件
         central_widget = QWidget()
@@ -258,11 +396,15 @@ class StyleTransferApp(QMainWindow):
         if not self.running:
             self.running = True
             self.start_button.setText('停止')
+            self.start_button.setStyleSheet("background-color: #D32F2F;")
+            self.start_button.setIcon(QIcon('icons/stop.png'))
             self.timer.start(30)  # 約 33 FPS
             self.video_dialog.show()
         else:
             self.running = False
             self.start_button.setText('開始')
+            self.start_button.setStyleSheet("background-color: #0078D7;")
+            self.start_button.setIcon(QIcon('icons/play.png'))
             self.timer.stop()
             self.video_dialog.hide()
             
@@ -270,6 +412,8 @@ class StyleTransferApp(QMainWindow):
         if not self.stream_dialog.isVisible():
             if self.stream_dialog.start_stream():
                 self.stream_button.setText('關閉串流')
+                self.stream_button.setStyleSheet("background-color: #D32F2F;")
+                self.stream_button.setIcon(QIcon('icons/stop_stream.png'))
                 self.stream_dialog.show()
             else:
                 print("無法開啟串流")
@@ -277,6 +421,8 @@ class StyleTransferApp(QMainWindow):
             self.stream_dialog.stop_stream()
             self.stream_dialog.hide()
             self.stream_button.setText('開啟串流')
+            self.stream_button.setStyleSheet("background-color: #0078D7;")
+            self.stream_button.setIcon(QIcon('icons/stream.png'))
             
     def toggleSegment(self, state):
         self.segment_human = state == Qt.Checked
@@ -298,8 +444,13 @@ class StyleTransferApp(QMainWindow):
         
     def updateStatusLabels(self):
         self.segment_status.setText(f'人像分割: {"開啟" if self.segment_human else "關閉"}')
+        self.segment_status.setStyleSheet(f"color: {'#4CAF50' if self.segment_human else '#FF5722'};")
+        
         self.gesture_status.setText(f'手勢辨識: {"開啟" if self.detect_gesture else "關閉"}')
+        self.gesture_status.setStyleSheet(f"color: {'#4CAF50' if self.detect_gesture else '#FF5722'};")
+        
         self.person_status.setText(f'人數計數: {"開啟" if self.detect_person else "關閉"}')
+        self.person_status.setStyleSheet(f"color: {'#4CAF50' if self.detect_person else '#FF5722'};")
         
     def update_frame(self):
         ret_val, img = self.cam.read()
@@ -424,8 +575,21 @@ class StyleTransferApp(QMainWindow):
         simg = cv2.resize(simg, (self.swidth, self.sheight), interpolation=cv2.INTER_CUBIC)
         result[0:self.sheight, 0:self.swidth, :] = simg
         
+        # 添加風格信息
+        cv2.putText(result, f"Style: {self.style_idx+1}/{self.style_loader.size()}", 
+                   (self.swidth + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        
         # 合併原始影像和風格化結果
         display_img = np.concatenate((cimg, result), axis=1)
+        
+        # 添加分隔線
+        cv2.line(display_img, (cimg.shape[1], 0), (cimg.shape[1], display_img.shape[0]), (255, 255, 255), 2)
+        
+        # 添加標題
+        cv2.putText(display_img, "原始影像", (cimg.shape[1]//2 - 80, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(display_img, "風格化結果", (cimg.shape[1] + cimg.shape[1]//2 - 100, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         
         # 轉換為 QImage 並顯示在彈跳視窗中
         h, w, c = display_img.shape
@@ -442,6 +606,25 @@ class StyleTransferApp(QMainWindow):
 
 def run_demo(args):
     app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create('Fusion'))  # 使用 Fusion 風格
+    
+    # 設置應用程式全局樣式
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.Window, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.WindowText, Qt.white)
+    dark_palette.setColor(QPalette.Base, QColor(25, 25, 25))
+    dark_palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+    dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+    dark_palette.setColor(QPalette.Text, Qt.white)
+    dark_palette.setColor(QPalette.Button, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.ButtonText, Qt.white)
+    dark_palette.setColor(QPalette.BrightText, Qt.red)
+    dark_palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+    app.setPalette(dark_palette)
+    
     window = StyleTransferApp(args)
     window.show()
     sys.exit(app.exec_())
