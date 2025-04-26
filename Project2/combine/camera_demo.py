@@ -3,13 +3,18 @@ import cv2
 import numpy as np
 import torch
 from torch.autograd import Variable
+import mediapipe as mp
 
 from net import Net
 from option import Options
 import utils
 from utils import StyleLoader
 
-def run_demo(args, mirror=False):
+def run_demo(args, mirror=False, segment_human=True):
+	# 初始化 mediapipe selfie segmentation
+	mp_selfie_segmentation = mp.solutions.selfie_segmentation
+	selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
+
 	style_model = Net(ngf=args.ngf)
 	model_dict = torch.load(args.model)
 	model_dict_clone = model_dict.copy()
@@ -25,7 +30,7 @@ def run_demo(args, mirror=False):
 		style_loader = StyleLoader(args.style_folder, args.style_size, False)
 
 	# Define the codec and create VideoWriter object
-	height =  args.demo_size
+	height = args.demo_size
 	width = int(4.0/3*args.demo_size)
 	swidth = int(width/4)
 	sheight = int(height/4)
@@ -39,17 +44,24 @@ def run_demo(args, mirror=False):
 	idx = 0
 	while True:
 		# read frame
-		# idx += 1
 		ret_val, img = cam.read()
-		if mirror: 
+		if mirror:
 			img = cv2.flip(img, 1)
 		cimg = img.copy()
+
+		# 人像分割
+		if segment_human:
+			image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+			results = selfie_segmentation.process(image_rgb)
+			mask = results.segmentation_mask
+			condition = mask > 0.5
+			condition = condition.astype(np.uint8) * 255
+			condition_3ch = cv2.merge([condition, condition, condition])
+		else:
+			condition_3ch = np.zeros_like(img)
+
+		# 風格轉換
 		img = np.array(img).transpose(2, 0, 1)
-		# changing style 
-		# if idx%20 == 1:
-		# 	style_v = style_loader.get(int(idx/20))
-		# 	style_v = Variable(style_v.data)
-		# 	style_model.setTarget(style_v)
 		style_v = style_loader.get(0)
 		style_v = Variable(style_v.data)
 		style_model.setTarget(style_v)
@@ -71,17 +83,27 @@ def run_demo(args, mirror=False):
 		img = img.transpose(1, 2, 0).astype('uint8')
 		simg = simg.transpose(1, 2, 0).astype('uint8')
 
+		# 將風格化結果與原始影像根據人像遮罩合併
+		img_original = cimg.copy()
+		img_stylized = img.copy()
+		if segment_human:
+			result = np.where(condition_3ch > 0, img_original, img_stylized)
+		else:
+			result = img_stylized
+
 		# display
 		simg = cv2.resize(simg,(swidth, sheight), interpolation = cv2.INTER_CUBIC)
-		cimg[0:sheight,0:swidth,:]=simg
-		img = np.concatenate((cimg,img),axis=1)
+		result[0:sheight,0:swidth,:]=simg
+		img = np.concatenate((cimg,result),axis=1)
 		cv2.imshow('MSG Demo', img)
-		#cv2.imwrite('stylized/%i.jpg'%idx,img)
+
 		key = cv2.waitKey(1)
 		if args.record:
 			out.write(img)
-		if key == 27: 
+		if key == 27:
 			break
+		elif key == ord('s'):  # 按's'鍵切換人像分割
+			segment_human = not segment_human
 	cam.release()
 	if args.record:
 		out.release()
