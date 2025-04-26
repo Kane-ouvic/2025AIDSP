@@ -6,7 +6,7 @@ from torch.autograd import Variable
 import mediapipe as mp
 import joblib
 from ultralytics import YOLO
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox, QDialog
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import QTimer, Qt, pyqtSlot
 import sys
@@ -39,6 +39,19 @@ def compute_distances(landmarks):
 
     return distances
 
+class VideoDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('即時影像')
+        self.setGeometry(100, 100, 1200, 700)
+        
+        layout = QVBoxLayout()
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.image_label)
+        
+        self.setLayout(layout)
+
 class StyleTransferApp(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -54,17 +67,15 @@ class StyleTransferApp(QMainWindow):
         self.initUI()
         self.initModels()
         
+        # 創建視頻顯示對話框
+        self.video_dialog = VideoDialog(self)
+        
     def initUI(self):
         self.setWindowTitle('風格轉換即時演示')
-        self.setGeometry(100, 100, 1200, 700)
+        self.setGeometry(100, 100, 500, 300)
         
         # 主佈局
         main_layout = QVBoxLayout()
-        
-        # 影像顯示區域
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.image_label)
         
         # 控制按鈕區域
         control_layout = QHBoxLayout()
@@ -188,10 +199,12 @@ class StyleTransferApp(QMainWindow):
             self.running = True
             self.start_button.setText('停止')
             self.timer.start(30)  # 約 33 FPS
+            self.video_dialog.show()
         else:
             self.running = False
             self.start_button.setText('開始')
             self.timer.stop()
+            self.video_dialog.hide()
             
     def toggleSegment(self, state):
         self.segment_human = state == Qt.Checked
@@ -330,15 +343,16 @@ class StyleTransferApp(QMainWindow):
         # 合併原始影像和風格化結果
         display_img = np.concatenate((cimg, result), axis=1)
         
-        # 轉換為 QImage 並顯示
+        # 轉換為 QImage 並顯示在彈跳視窗中
         h, w, c = display_img.shape
         bytes_per_line = 3 * w
         q_img = QImage(display_img.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-        self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio))
+        self.video_dialog.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.video_dialog.image_label.width(), self.video_dialog.image_label.height(), Qt.KeepAspectRatio))
         
     def closeEvent(self, event):
         self.timer.stop()
         self.cam.release()
+        self.video_dialog.close()
         event.accept()
 
 def run_demo(args):
@@ -348,14 +362,16 @@ def run_demo(args):
     sys.exit(app.exec_())
 
 def main():
-    # getting things ready
+    print("main start")
     args = Options().parse()
+    print(vars(args))
     if args.subcommand is None:
+        print("subcommand is None")
         raise ValueError("ERROR: specify the experiment type")
     if args.cuda and not torch.cuda.is_available():
+        print("cuda not available")
         raise ValueError("ERROR: cuda is not available, try running on CPU")
-
-    # run demo
+    print("run_demo start")
     run_demo(args)
 
 if __name__ == '__main__':
