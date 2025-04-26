@@ -220,15 +220,15 @@ class StyleTransferApp(QMainWindow):
         self.labels = [label.strip() for label in self.labels]
 
         # 初始化 YOLO 模型
-        try:
-            print("正在載入 YOLO 模型...")
-            self.yolo_model = YOLO('./models/yolov8n.pt')
-            print("YOLO 模型載入成功")
-        except Exception as e:
-            print(f"YOLO 模型載入失敗: {str(e)}")
-            self.detect_person = False
-            self.person_checkbox.setChecked(False)
-            self.person_checkbox.setEnabled(False)
+        # try:
+        #     print("正在載入 YOLO 模型...")
+        #     self.yolo_model = YOLO('./models/yolov8n.pt')
+        #     print("YOLO 模型載入成功")
+        # except Exception as e:
+        #     print(f"YOLO 模型載入失敗: {str(e)}")
+        #     self.detect_person = False
+        #     self.person_checkbox.setChecked(False)
+        #     self.person_checkbox.setEnabled(False)
 
         # 初始化風格轉換模型
         self.style_model = Net(ngf=self.args.ngf)
@@ -311,25 +311,25 @@ class StyleTransferApp(QMainWindow):
         cimg = img.copy()
 
         # 人數計數
-        if self.detect_person:
-            try:
-                results = self.yolo_model(cimg, stream=True)
-                person_count = 0
-                for result in results:
-                    boxes = result.boxes
-                    for box in boxes:
-                        cls_id = int(box.cls[0])
-                        if self.yolo_model.names[cls_id] == 'person':
-                            person_count += 1
-                            x1, y1, x2, y2 = map(int, box.xyxy[0])
-                            cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                cv2.putText(cimg, f"People Count: {person_count}", (20, self.height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            except Exception as e:
-                print(f"YOLO 推論失敗: {str(e)}")
-                self.detect_person = False
-                self.person_checkbox.setChecked(False)
-                self.updateStatusLabels()
+        # if self.detect_person:
+        #     try:
+        #         results = self.yolo_model(cimg, stream=True)
+        #         person_count = 0
+        #         for result in results:
+        #             boxes = result.boxes
+        #             for box in boxes:
+        #                 cls_id = int(box.cls[0])
+        #                 if self.yolo_model.names[cls_id] == 'person':
+        #                     person_count += 1
+        #                     x1, y1, x2, y2 = map(int, box.xyxy[0])
+        #                     cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        #                     cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        #         cv2.putText(cimg, f"People Count: {person_count}", (20, self.height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        #     except Exception as e:
+        #         print(f"YOLO 推論失敗: {str(e)}")
+        #         self.detect_person = False
+        #         self.person_checkbox.setChecked(False)
+        #         self.updateStatusLabels()
 
         # 手勢辨識
         if self.detect_gesture:
