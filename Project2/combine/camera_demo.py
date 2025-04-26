@@ -283,7 +283,7 @@ class StyleTransferApp(QMainWindow):
                     # 顯示手部關鍵點
                     mp.solutions.drawing_utils.draw_landmarks(cimg, landmarks, self.mp_hands.HAND_CONNECTIONS)
                     
-                    # 根據手勢切換風格
+                    # 根據手勢切換功能
                     if confidence > 0.8:
                         if label != self.last_gesture:  # 只有當手勢改變時才切換
                             if label == "Good":
@@ -291,6 +291,18 @@ class StyleTransferApp(QMainWindow):
                                 self.last_gesture = label
                             elif label == "Bad":
                                 self.style_idx = (self.style_idx + 1) % self.style_loader.size()
+                                self.last_gesture = label
+                            elif label == "Cool":
+                                # 切換人像遮罩
+                                self.segment_human = not self.segment_human
+                                self.segment_checkbox.setChecked(self.segment_human)
+                                self.updateStatusLabels()
+                                self.last_gesture = label
+                            elif label == "Ya":
+                                # 切換計數功能
+                                self.detect_person = not self.detect_person
+                                self.person_checkbox.setChecked(self.detect_person)
+                                self.updateStatusLabels()
                                 self.last_gesture = label
             else:
                 self.last_gesture = None  # 當沒有檢測到手時重置上一次的手勢
