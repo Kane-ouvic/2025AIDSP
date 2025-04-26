@@ -5,6 +5,7 @@ import torch
 from torch.autograd import Variable
 import mediapipe as mp
 import joblib
+from ultralytics import YOLO
 
 from net import Net
 from option import Options
@@ -34,7 +35,7 @@ def compute_distances(landmarks):
 
     return distances
 
-def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
+def run_demo(args, mirror=False, segment_human=False, detect_gesture=False, detect_person=False):
 	# 初始化 mediapipe selfie segmentation
 	mp_selfie_segmentation = mp.solutions.selfie_segmentation
 	selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
@@ -54,6 +55,10 @@ def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 	with open(label_file, 'r') as f:
 		labels = f.readlines()
 	labels = [label.strip() for label in labels]
+
+	# 初始化 YOLO 模型
+	if detect_person:
+		yolo_model = YOLO('./models/yolov8n.pt')
 
 	style_model = Net(ngf=args.ngf)
 	model_dict = torch.load(args.model)
@@ -90,6 +95,21 @@ def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 		if mirror:
 			img = cv2.flip(img, 1)
 		cimg = img.copy()
+
+		# 人數計數
+		if detect_person:
+			results = yolo_model(cimg, stream=True)
+			person_count = 0
+			for result in results:
+				boxes = result.boxes
+				for box in boxes:
+					cls_id = int(box.cls[0])
+					if yolo_model.names[cls_id] == 'person':
+						person_count += 1
+						x1, y1, x2, y2 = map(int, box.xyxy[0])
+						cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+						cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+			cv2.putText(cimg, f"People Count: {person_count}", (20, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
 		# 手勢辨識
 		if detect_gesture:
@@ -184,6 +204,8 @@ def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 			segment_human = not segment_human
 		elif key == ord('g'):  # 按'g'鍵切換手勢辨識
 			detect_gesture = not detect_gesture
+		elif key == ord('w'):  # 按'w'鍵切換人數計數
+			detect_person = not detect_person
 		elif key == ord('a'):  # 按'a'鍵切換上一個風格
 			style_idx = (style_idx - 1) % style_loader.size()
 		elif key == ord('d'):  # 按'd'鍵切換下一個風格
