@@ -4,16 +4,56 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 import mediapipe as mp
+import joblib
 
 from net import Net
 from option import Options
 import utils
 from utils import StyleLoader
 
-def run_demo(args, mirror=False, segment_human=True):
+def compute_distances(landmarks):
+    # Define pairs for distance calculation
+    pairs = [(0, 1), (0, 2), (0, 3), (0, 4),
+             (0, 5), (0, 6), (0, 7), (0, 8),
+             (0, 9), (0, 10), (0, 11), (0, 12),
+             (0, 13), (0, 14), (0, 15), (0, 16),
+             (0, 17), (0, 18), (0, 19), (0, 20),
+             (4, 8), (8, 12), (12, 16), (16, 20)]
+
+    distances = []
+    reference_distance = np.linalg.norm(
+        np.array([landmarks.landmark[0].x, landmarks.landmark[0].y]) -
+        np.array([landmarks.landmark[9].x, landmarks.landmark[9].y])
+    )
+
+    for pair in pairs:
+        p1 = np.array([landmarks.landmark[pair[0]].x, landmarks.landmark[pair[0]].y])
+        p2 = np.array([landmarks.landmark[pair[1]].x, landmarks.landmark[pair[1]].y])
+        distance = np.linalg.norm(p1 - p2)
+        distances.append(distance/reference_distance)  # Normalize the distance
+
+    return distances
+
+def run_demo(args, mirror=False, segment_human=True, detect_gesture=True):
 	# 初始化 mediapipe selfie segmentation
 	mp_selfie_segmentation = mp.solutions.selfie_segmentation
 	selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
+
+	# 初始化手勢辨識
+	mp_hands = mp.solutions.hands
+	hands = mp_hands.Hands()
+	
+	# 載入手勢模型
+	model_filename = "models/svm_model.pkl"
+	clf = joblib.load(model_filename)
+	scaler_filename = "models/scaler.pkl"
+	scaler = joblib.load(scaler_filename)
+	
+	# 載入標籤
+	label_file = "models/labels.txt"
+	with open(label_file, 'r') as f:
+		labels = f.readlines()
+	labels = [label.strip() for label in labels]
 
 	style_model = Net(ngf=args.ngf)
 	model_dict = torch.load(args.model)
@@ -42,12 +82,37 @@ def run_demo(args, mirror=False, segment_human=True):
 	cam.set(4, height)
 	key = 0
 	idx = 0
+	style_idx = 0
 	while True:
 		# read frame
 		ret_val, img = cam.read()
 		if mirror:
 			img = cv2.flip(img, 1)
 		cimg = img.copy()
+
+		# 手勢辨識
+		if detect_gesture:
+			rgb_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+			hand_results = hands.process(rgb_frame)
+			
+			if hand_results.multi_hand_landmarks:
+				for index, landmarks in enumerate(hand_results.multi_hand_landmarks):
+					# 分辨左右手
+					hand_label = "Right" if hand_results.multi_handedness[index].classification[0].label == "Left" else "Left"
+					
+					distances = compute_distances(landmarks)
+					distances = scaler.transform([distances])
+					
+					prediction = clf.predict(distances)
+					confidence = np.max(clf.predict_proba(distances))
+					
+					label = labels[prediction[0]]
+					display_text = f"{hand_label} Hand: {label} ({confidence*100:.2f}%)"
+					
+					cv2.putText(cimg, display_text, (10, 30 + (index * 40)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+					
+					# 顯示手部關鍵點
+					mp.solutions.drawing_utils.draw_landmarks(cimg, landmarks, mp_hands.HAND_CONNECTIONS)
 
 		# 人像分割
 		if segment_human:
@@ -62,7 +127,7 @@ def run_demo(args, mirror=False, segment_human=True):
 
 		# 風格轉換
 		img = np.array(img).transpose(2, 0, 1)
-		style_v = style_loader.get(0)
+		style_v = style_loader.get(style_idx)
 		style_v = Variable(style_v.data)
 		style_model.setTarget(style_v)
 
@@ -104,6 +169,12 @@ def run_demo(args, mirror=False, segment_human=True):
 			break
 		elif key == ord('s'):  # 按's'鍵切換人像分割
 			segment_human = not segment_human
+		elif key == ord('g'):  # 按'g'鍵切換手勢辨識
+			detect_gesture = not detect_gesture
+		elif key == ord('a'):  # 按'a'鍵切換上一個風格
+			style_idx = (style_idx - 1) % style_loader.size()
+		elif key == ord('d'):  # 按'd'鍵切換下一個風格
+			style_idx = (style_idx + 1) % style_loader.size()
 	cam.release()
 	if args.record:
 		out.release()
