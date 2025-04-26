@@ -5,8 +5,9 @@ FROM nvcr.io/nvidia/l4t-pytorch:r32.7.1-pth1.9-py3
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# 安裝基本依賴（OpenCV 相關）
-RUN apt-get update && apt-get install -y \
+# 移除有問題的套件庫並更新
+RUN rm -f /etc/apt/sources.list.d/kitware.list && \
+    apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
