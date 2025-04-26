@@ -57,8 +57,13 @@ def run_demo(args, mirror=False, segment_human=False, detect_gesture=False, dete
 	labels = [label.strip() for label in labels]
 
 	# 初始化 YOLO 模型
-	if detect_person:
+	try:
+		print("正在載入 YOLO 模型...")
 		yolo_model = YOLO('./models/yolov8n.pt')
+		print("YOLO 模型載入成功")
+	except Exception as e:
+		print(f"YOLO 模型載入失敗: {str(e)}")
+		detect_person = False
 
 	style_model = Net(ngf=args.ngf)
 	model_dict = torch.load(args.model)
@@ -93,23 +98,27 @@ def run_demo(args, mirror=False, segment_human=False, detect_gesture=False, dete
 		# read frame
 		ret_val, img = cam.read()
 		if mirror:
-			img = cv2.flip(img, 1)
+    			img = cv2.flip(img, 1)
 		cimg = img.copy()
 
 		# 人數計數
 		if detect_person:
-			results = yolo_model(cimg, stream=True)
-			person_count = 0
-			for result in results:
-				boxes = result.boxes
-				for box in boxes:
-					cls_id = int(box.cls[0])
-					if yolo_model.names[cls_id] == 'person':
-						person_count += 1
-						x1, y1, x2, y2 = map(int, box.xyxy[0])
-						cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
-						cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-			cv2.putText(cimg, f"People Count: {person_count}", (20, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+			try:
+				results = yolo_model(cimg, stream=True)
+				person_count = 0
+				for result in results:
+					boxes = result.boxes
+					for box in boxes:
+						cls_id = int(box.cls[0])
+						if yolo_model.names[cls_id] == 'person':
+							person_count += 1
+							x1, y1, x2, y2 = map(int, box.xyxy[0])
+							cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+							cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+				cv2.putText(cimg, f"People Count: {person_count}", (20, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+			except Exception as e:
+				print(f"YOLO 推論失敗: {str(e)}")
+				detect_person = False
 
 		# 手勢辨識
 		if detect_gesture:
