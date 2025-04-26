@@ -52,6 +52,58 @@ class VideoDialog(QDialog):
         
         self.setLayout(layout)
 
+class StreamDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('串流影像')
+        self.setGeometry(100, 100, 800, 600)
+        
+        layout = QVBoxLayout()
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.image_label)
+        
+        self.setLayout(layout)
+        
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_stream)
+        self.stream = None
+        self.running = False
+        
+    def start_stream(self):
+        if not self.running:
+            self.stream = cv2.VideoCapture("rtmp://140.116.56.6:1935/live")
+            if not self.stream.isOpened():
+                print("錯誤：無法開啟串流來源")
+                return False
+            self.running = True
+            self.timer.start(30)
+            return True
+        return False
+        
+    def stop_stream(self):
+        if self.running:
+            self.timer.stop()
+            if self.stream:
+                self.stream.release()
+            self.running = False
+            
+    def update_stream(self):
+        if self.stream and self.running:
+            ret, frame = self.stream.read()
+            if not ret:
+                self.stop_stream()
+                return
+                
+            h, w, c = frame.shape
+            bytes_per_line = 3 * w
+            q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+            self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio))
+            
+    def closeEvent(self, event):
+        self.stop_stream()
+        event.accept()
+
 class StyleTransferApp(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -70,6 +122,9 @@ class StyleTransferApp(QMainWindow):
         # 創建視頻顯示對話框
         self.video_dialog = VideoDialog(self)
         
+        # 創建串流顯示對話框
+        self.stream_dialog = StreamDialog(self)
+        
     def initUI(self):
         self.setWindowTitle('風格轉換即時演示')
         self.setGeometry(100, 100, 500, 300)
@@ -84,6 +139,11 @@ class StyleTransferApp(QMainWindow):
         self.start_button = QPushButton('開始')
         self.start_button.clicked.connect(self.toggleCamera)
         control_layout.addWidget(self.start_button)
+        
+        # 串流按鈕
+        self.stream_button = QPushButton('開啟串流')
+        self.stream_button.clicked.connect(self.toggleStream)
+        control_layout.addWidget(self.stream_button)
         
         # 功能開關區域
         toggle_layout = QHBoxLayout()
@@ -205,6 +265,18 @@ class StyleTransferApp(QMainWindow):
             self.start_button.setText('開始')
             self.timer.stop()
             self.video_dialog.hide()
+            
+    def toggleStream(self):
+        if not self.stream_dialog.isVisible():
+            if self.stream_dialog.start_stream():
+                self.stream_button.setText('關閉串流')
+                self.stream_dialog.show()
+            else:
+                print("無法開啟串流")
+        else:
+            self.stream_dialog.stop_stream()
+            self.stream_dialog.hide()
+            self.stream_button.setText('開啟串流')
             
     def toggleSegment(self, state):
         self.segment_human = state == Qt.Checked
@@ -365,6 +437,7 @@ class StyleTransferApp(QMainWindow):
         self.timer.stop()
         self.cam.release()
         self.video_dialog.close()
+        self.stream_dialog.close()
         event.accept()
 
 def run_demo(args):
