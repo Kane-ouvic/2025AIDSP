@@ -201,7 +201,7 @@ class StyleTransferApp(QMainWindow):
     def initModels(self):
         # 初始化 mediapipe selfie segmentation
         self.mp_selfie_segmentation = mp.solutions.selfie_segmentation
-        self.selfie_segmentation = self.mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
+        self.selfie_segmentation = self.mp_selfie_segmentation.SelfieSegmentation(model_selection=0)
 
         # 初始化手勢辨識
         self.mp_hands = mp.solutions.hands
@@ -229,6 +229,10 @@ class StyleTransferApp(QMainWindow):
         #     self.detect_person = False
         #     self.person_checkbox.setChecked(False)
         #     self.person_checkbox.setEnabled(False)
+
+        # 清空 CUDA 緩存以優化記憶體使用
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # 初始化風格轉換模型
         self.style_model = Net(ngf=self.args.ngf)
@@ -393,25 +397,28 @@ class StyleTransferApp(QMainWindow):
         # 風格轉換
         img_for_style = np.array(img).transpose(2, 0, 1)
         style_v = self.style_loader.get(self.style_idx)
-        style_v = Variable(style_v.data)
-        self.style_model.setTarget(style_v)
-
+        
         img_tensor = torch.from_numpy(img_for_style).unsqueeze(0).float()
         if self.args.cuda:
             img_tensor = img_tensor.cuda()
+            style_v = style_v.cuda()
 
-        img_tensor = Variable(img_tensor)
-        img_tensor = self.style_model(img_tensor)
-
+        with torch.no_grad():
+            self.style_model.setTarget(style_v)
+            img_stylized = self.style_model(img_tensor).clamp(0, 255)[0]
+            
+        # 處理風格圖像
         if self.args.cuda:
-            simg = style_v.cpu().data[0].numpy()
-            img_stylized = img_tensor.cpu().clamp(0, 255).data[0].numpy()
+            simg = style_v[0].cpu().contiguous()
+            img_stylized = img_stylized.cpu()
+            # 清空 CUDA 緩存以優化記憶體使用
+            torch.cuda.empty_cache()
         else:
-            simg = style_v.data.numpy()
-            img_stylized = img_tensor.clamp(0, 255).data[0].numpy()
-        simg = np.squeeze(simg)
-        img_stylized = img_stylized.transpose(1, 2, 0).astype('uint8')
-        simg = simg.transpose(1, 2, 0).astype('uint8')
+            simg = style_v[0].contiguous()
+            
+        # 轉換為 numpy 格式以便 OpenCV 處理
+        simg = simg.permute(1, 2, 0).byte().numpy()
+        img_stylized = img_stylized.permute(1, 2, 0).byte().numpy()
 
         # 將風格化結果與原始影像根據人像遮罩合併
         img_original = cimg.copy()
@@ -438,6 +445,9 @@ class StyleTransferApp(QMainWindow):
         self.cam.release()
         self.video_dialog.close()
         self.stream_dialog.close()
+        # 清空 CUDA 緩存以釋放記憶體
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         event.accept()
 
 def run_demo(args):
@@ -456,6 +466,9 @@ def main():
     if args.cuda and not torch.cuda.is_available():
         print("cuda not available")
         raise ValueError("ERROR: cuda is not available, try running on CPU")
+    # 清空 CUDA 緩存以優化記憶體使用
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     print("run_demo start")
     run_demo(args)
 
