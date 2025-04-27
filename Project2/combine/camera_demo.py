@@ -607,14 +607,17 @@ class StyleTransferApp(QMainWindow):
             result = np.where(condition_3ch > 0, img_original, img_stylized)
         else:
             result = img_stylized
-
-        # 顯示風格縮圖
-        simg = cv2.resize(simg, (self.swidth, self.sheight), interpolation=cv2.INTER_CUBIC)
-        result_copy = result.copy()
-        result_copy[0:self.sheight, 0:self.swidth, :] = simg
+        # 顯示風格縮圖在右側影像的左上角
+        simg_resized = cv2.resize(simg, (self.swidth, self.sheight), interpolation=cv2.INTER_CUBIC)
+        
+        # 在右側影像的左上角添加風格縮圖
+        result[0:self.sheight, 0:self.swidth, :] = simg_resized
+        
+        # 確保 result 是 numpy 數組並且數據類型正確
+        result = np.ascontiguousarray(result, dtype=np.uint8)
         
         # 添加風格信息
-        result_copy = cv2.putText(result_copy, f"Style #{self.style_idx+1}", (10, self.sheight + 30), 
+        cv2.putText(result, f"Style {self.style_idx+1}", (10, self.sheight + 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         
         # 合併原始影像和風格化結果
@@ -626,7 +629,6 @@ class StyleTransferApp(QMainWindow):
         bytes_per_line = 3 * w
         q_img = QImage(display_img.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
         self.video_dialog.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.video_dialog.image_label.width(), self.video_dialog.image_label.height(), Qt.KeepAspectRatio))
-        
     def closeEvent(self, event):
         self.timer.stop()
         self.cam.release()
