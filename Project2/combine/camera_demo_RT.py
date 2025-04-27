@@ -82,13 +82,13 @@ class StreamDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('串流影像')
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1200, 700)
         self.setStyleSheet("background-color: #2D2D30; color: white;")
         
         layout = QVBoxLayout()
         
         # 創建標題標籤
-        title_label = QLabel('即時串流')
+        title_label = QLabel('風格轉換即時預覽')
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setFont(QFont('Arial', 14, QFont.Bold))
         title_label.setStyleSheet("color: #00AAFF; margin: 10px;")
@@ -102,16 +102,22 @@ class StreamDialog(QDialog):
         
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(640, 480)
+        self.image_label.setMinimumSize(800, 500)
         frame_layout.addWidget(self.image_label)
         
         layout.addWidget(frame)
         
-        # 添加狀態標籤
-        self.status_label = QLabel('等待連接...')
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("color: #CCCCCC;")
-        layout.addWidget(self.status_label)
+        # 添加說明文字
+        info_label = QLabel('左側為原始影像，右側為風格化後的影像')
+        info_label.setAlignment(Qt.AlignCenter)
+        info_label.setStyleSheet("color: #CCCCCC; font-style: italic;")
+        layout.addWidget(info_label)
+        
+        # 添加連接狀態標籤
+        self.connection_status = QLabel('連接狀態: 未連接')
+        self.connection_status.setAlignment(Qt.AlignCenter)
+        self.connection_status.setStyleSheet("color: #FF5555; font-weight: bold;")
+        layout.addWidget(self.connection_status)
         
         self.setLayout(layout)
         
@@ -122,14 +128,15 @@ class StreamDialog(QDialog):
         
     def start_stream(self):
         if not self.running:
-            self.status_label.setText('正在連接串流...')
             self.stream = cv2.VideoCapture("rtmp://140.116.56.6:1935/live")
             if not self.stream.isOpened():
-                self.status_label.setText('錯誤：無法開啟串流來源')
+                self.connection_status.setText('連接狀態: 連接失敗')
+                self.connection_status.setStyleSheet("color: #FF5555; font-weight: bold;")
                 return False
             self.running = True
             self.timer.start(30)
-            self.status_label.setText('串流連接成功')
+            self.connection_status.setText('連接狀態: 已連接')
+            self.connection_status.setStyleSheet("color: #55FF55; font-weight: bold;")
             return True
         return False
         
@@ -139,14 +146,16 @@ class StreamDialog(QDialog):
             if self.stream:
                 self.stream.release()
             self.running = False
-            self.status_label.setText('串流已停止')
+            self.connection_status.setText('連接狀態: 已斷開')
+            self.connection_status.setStyleSheet("color: #FFAA55; font-weight: bold;")
             
     def update_stream(self):
         if self.stream and self.running:
             ret, frame = self.stream.read()
             if not ret:
-                self.status_label.setText('串流中斷')
                 self.stop_stream()
+                self.connection_status.setText('連接狀態: 串流中斷')
+                self.connection_status.setStyleSheet("color: #FF5555; font-weight: bold;")
                 return
                 
             h, w, c = frame.shape
