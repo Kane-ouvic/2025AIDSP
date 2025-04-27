@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import torch
 from torch.autograd import Variable
+from torch.cuda.amp import autocast
+
 import mediapipe as mp
 import joblib
 # from ultralytics import YOLO
@@ -600,6 +602,8 @@ class StyleTransferApp(QMainWindow):
         # 轉換為 numpy 格式以便 OpenCV 處理
         simg = simg.permute(1, 2, 0).byte().numpy()
         img_stylized = img_stylized.permute(1, 2, 0).byte().numpy()
+        
+
 
         # 將風格化結果與原始影像根據人像遮罩合併
         img_original = cimg.copy()
