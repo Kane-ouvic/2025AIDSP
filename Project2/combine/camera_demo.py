@@ -128,7 +128,7 @@ class StreamDialog(QDialog):
         
     def start_stream(self):
         if not self.running:
-            self.stream = cv2.VideoCapture("rtmp://140.116.56.6:1935/live")
+            self.stream = cv2.VideoCapture("rtmp://140.116.215.49:1935/live")
             if not self.stream.isOpened():
                 self.connection_status.setText('連接狀態: 連接失敗')
                 self.connection_status.setStyleSheet("color: #FF5555; font-weight: bold;")
