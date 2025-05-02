@@ -159,10 +159,152 @@ class StreamDialog(QDialog):
                 self.connection_status.setStyleSheet("color: #FF5555; font-weight: bold;")
                 return
                 
-            h, w, c = frame.shape
-            bytes_per_line = 3 * w
-            q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-            self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio))
+            # 獲取父窗口的風格轉換相關屬性和方法
+            parent = self.parent()
+            if parent:
+                img = frame
+                cimg = img.copy()
+                
+                # 人數計數
+                # if parent.detect_person:
+                #     try:
+                #         results = parent.yolo_model(cimg, stream=True)
+                #         person_count = 0
+                #         for result in results:
+                #             boxes = result.boxes
+                #             for box in boxes:
+                #                 cls_id = int(box.cls[0])
+                #                 if parent.yolo_model.names[cls_id] == 'person':
+                #                     person_count += 1
+                #                     x1, y1, x2, y2 = map(int, box.xyxy[0])
+                #                     cv2.rectangle(cimg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                #                     cv2.putText(cimg, 'Person', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                #         cv2.putText(cimg, f"People Count: {person_count}", (20, parent.height - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                #     except Exception as e:
+                #         print(f"YOLO 推論失敗: {str(e)}")
+                
+                # 手勢辨識
+                if parent.detect_gesture:
+                    rgb_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    hand_results = parent.hands.process(rgb_frame)
+                    
+                    if hand_results.multi_hand_landmarks:
+                        for index, landmarks in enumerate(hand_results.multi_hand_landmarks):
+                            # 分辨左右手
+                            hand_label = "Right" if hand_results.multi_handedness[index].classification[0].label == "Left" else "Left"
+                            
+                            distances = compute_distances(landmarks)
+                            distances = parent.scaler.transform([distances])
+                            
+                            prediction = parent.clf.predict(distances)
+                            confidence = np.max(parent.clf.predict_proba(distances))
+                            
+                            label = parent.labels[prediction[0]]
+                            display_text = f"{hand_label} Hand: {label} ({confidence*100:.2f}%)"
+                            
+                            cv2.putText(cimg, display_text, (10, 30 + (index * 40)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                            
+                            # 顯示手部關鍵點
+                            mp.solutions.drawing_utils.draw_landmarks(cimg, landmarks, parent.mp_hands.HAND_CONNECTIONS)
+                            
+                            # 根據手勢切換功能
+                            if confidence > 0.8:
+                                if label != parent.last_gesture:  # 只有當手勢改變時才切換
+                                    if label == "Good":
+                                        parent.style_idx = (parent.style_idx - 1) % parent.style_loader.size()
+                                        parent.style_slider.setValue(parent.style_idx)
+                                        parent.style_label.setText(f'風格 #{parent.style_idx+1}')
+                                        parent.last_gesture = label
+                                    elif label == "Bad":
+                                        parent.style_idx = (parent.style_idx + 1) % parent.style_loader.size()
+                                        parent.style_slider.setValue(parent.style_idx)
+                                        parent.style_label.setText(f'風格 #{parent.style_idx+1}')
+                                        parent.last_gesture = label
+                                    elif label == "Cool":
+                                        # 切換人像遮罩
+                                        parent.segment_human = not parent.segment_human
+                                        parent.segment_checkbox.setChecked(parent.segment_human)
+                                        parent.updateStatusLabels()
+                                        parent.last_gesture = label
+                                    elif label == "Ya":
+                                        # 切換計數功能
+                                        parent.detect_person = not parent.detect_person
+                                        parent.person_checkbox.setChecked(parent.detect_person)
+                                        parent.updateStatusLabels()
+                                        parent.last_gesture = label
+                    else:
+                        parent.last_gesture = None  # 當沒有檢測到手時重置上一次的手勢
+                
+                # 人像分割
+                if parent.segment_human:
+                    image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    results = parent.selfie_segmentation.process(image_rgb)
+                    mask = results.segmentation_mask
+                    condition = mask > 0.5
+                    condition = condition.astype(np.uint8) * 255
+                    condition_3ch = cv2.merge([condition, condition, condition])
+                else:
+                    condition_3ch = np.zeros_like(img)
+                
+                # 風格轉換
+                img_for_style = np.array(img).transpose(2, 0, 1)
+                style_v = parent.style_loader.get(parent.style_idx)
+                
+                img_tensor = torch.from_numpy(img_for_style).unsqueeze(0).float()
+                if parent.args.cuda:
+                    img_tensor = img_tensor.cuda()
+                    style_v = style_v.cuda()
+                
+                with torch.no_grad():
+                    parent.style_model.setTarget(style_v)
+                    img_stylized = parent.style_model(img_tensor).clamp(0, 255)[0]
+                
+                # 處理風格圖像
+                if parent.args.cuda:
+                    simg = style_v[0].cpu().contiguous()
+                    img_stylized = img_stylized.cpu()
+                    # 清空 CUDA 緩存以優化記憶體使用
+                    torch.cuda.empty_cache()
+                else:
+                    simg = style_v[0].contiguous()
+                
+                # 轉換為 numpy 格式以便 OpenCV 處理
+                simg = simg.permute(1, 2, 0).byte().numpy()
+                img_stylized = img_stylized.permute(1, 2, 0).byte().numpy()
+                
+                # 將風格化結果與原始影像根據人像遮罩合併
+                img_original = cimg.copy()
+                if parent.segment_human:
+                    result = np.where(condition_3ch > 0, img_original, img_stylized)
+                else:
+                    result = img_stylized
+                
+                # 顯示風格縮圖在右側影像的左上角
+                simg_resized = cv2.resize(simg, (parent.swidth, parent.sheight), interpolation=cv2.INTER_CUBIC)
+                
+                # 在右側影像的左上角添加風格縮圖
+                result[0:parent.sheight, 0:parent.swidth, :] = simg_resized
+                
+                # 確保 result 是 numpy 數組並且數據類型正確
+                result = np.ascontiguousarray(result, dtype=np.uint8)
+                
+                # 添加風格信息
+                cv2.putText(result, f"Style {parent.style_idx+1}", (10, parent.sheight + 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                
+                # 合併原始影像和風格化結果
+                display_img = np.concatenate((cimg, result), axis=1)
+                
+                # 轉換為 QImage 並顯示在彈跳視窗中
+                h, w, c = display_img.shape
+                bytes_per_line = 3 * w
+                q_img = QImage(display_img.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+                self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio))
+            else:
+                h, w, c = frame.shape
+                bytes_per_line = 3 * w
+                q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+                self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio))
             
     def closeEvent(self, event):
         self.stop_stream()
