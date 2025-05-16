@@ -5,7 +5,6 @@ import sys
 
 def main():
     print("main start")
-    args = Options().parse()
     print(vars(args))
     if args.subcommand is None:
         print("subcommand is None")
@@ -14,7 +13,6 @@ def main():
         print("cuda not available")
         raise ValueError("ERROR: cuda is not available, try running on CPU")
     print("run_demo start")
-    run_demo(args)
 
 if __name__ == '__main__':
     main()
