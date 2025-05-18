@@ -8,8 +8,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel, QVB
                              QStyleFactory)
 from PyQt5.QtGui import QImage, QPixmap, QFont, QIcon
 from PyQt5.QtCore import QTimer, Qt, QSize
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtCore import QUrl
 
 # --- Helper functions from demo.py (or similar) ---
 def euclidean_distance(kps1_flat, kps2_flat):
@@ -29,9 +27,6 @@ def cosine_similarity_calc(kps1_flat, kps2_flat):
 class PoseComparator:
     def __init__(self, similarity_method='cosine'):
         self.similarity_method = similarity_method.lower()
-        self.media_player = QMediaPlayer()
-        self.media_player.setVolume(100)  # 設置初始音量為最大
-        self.video_path = None
 
         self.mp_pose = mp.solutions.pose
         self.pose_detector = self.mp_pose.Pose(
@@ -77,11 +72,6 @@ class PoseComparator:
         self.reference_keypoints_timeline.clear()
         self.reference_results_timeline.clear()
         self.is_reference_loaded = False
-
-        # 設置影片音訊
-        video_url = QUrl.fromLocalFile(os.path.abspath(ref_video_path))
-        self.media_player.setMedia(QMediaContent(video_url))
-        print(f"已載入影片音訊: {ref_video_path}")  # 除錯訊息
 
         cap_ref = cv2.VideoCapture(self.ref_video_path)
         if not cap_ref.isOpened():
@@ -245,17 +235,6 @@ class PoseComparator:
     def close(self):
         if self.pose_detector:
             self.pose_detector.close()
-        self.media_player.stop()
-
-    def start_audio(self):
-        if self.media_player.state() != QMediaPlayer.PlayingState:
-            self.media_player.play()
-            print("開始播放音訊")  # 除錯訊息
-
-    def stop_audio(self):
-        if self.media_player.state() == QMediaPlayer.PlayingState:
-            self.media_player.stop()
-            print("停止播放音訊")  # 除錯訊息
 
 
 class DanceAppGUI(QMainWindow):
@@ -273,9 +252,6 @@ class DanceAppGUI(QMainWindow):
         self.stream_url = ""
         
         self.target_display_height = 480 # 處理後的影像高度
-
-        # 連接音訊播放器的錯誤信號
-        self.pose_comparator.media_player.error.connect(self.handle_media_error)
 
         self.initUI()
 
@@ -342,18 +318,6 @@ class DanceAppGUI(QMainWindow):
         status_layout.addWidget(self.lbl_overall_score)
         status_group.setLayout(status_layout)
         controls_layout.addWidget(status_group)
-
-        # 在控制面板中添加音量控制
-        volume_group = QGroupBox("音量控制")
-        volume_layout = QVBoxLayout()
-        
-        self.btn_mute = QPushButton("靜音")
-        self.btn_mute.setCheckable(True)
-        self.btn_mute.clicked.connect(self.toggle_mute)
-        volume_layout.addWidget(self.btn_mute)
-        
-        volume_group.setLayout(volume_layout)
-        controls_layout.addWidget(volume_group)
         
         controls_layout.addStretch(1) 
         main_layout.addWidget(controls_panel)
@@ -523,12 +487,7 @@ class DanceAppGUI(QMainWindow):
             self.is_running = True
             self.btn_start_stop.setText("停止比較")
             self.btn_start_stop.setIcon(QIcon.fromTheme("media-playback-stop", QIcon(":/qt-project.org/styles/commonstyle/images/standardbutton-stop-16.png")))
-            self.pose_comparator.reset_comparison()
-            
-            # 確保音訊播放器狀態正確
-            if self.pose_comparator.media_player.state() != QMediaPlayer.PlayingState:
-                self.pose_comparator.start_audio()
-            
+            self.pose_comparator.reset_comparison() 
             self.lbl_overall_score.setText("整體評分: 進行中...")
             self.timer.start(33) # Approx 30 FPS
             self.rb_webcam.setEnabled(False)
@@ -543,8 +502,6 @@ class DanceAppGUI(QMainWindow):
         if self.video_capture:
             self.video_capture.release()
             self.video_capture = None
-        
-        self.pose_comparator.stop_audio()  # 停止播放音訊
         
         self.btn_start_stop.setText("開始比較")
         self.btn_start_stop.setIcon(QIcon.fromTheme("media-playback-start", QIcon(":/qt-project.org/styles/commonstyle/images/standardbutton-play-16.png")))
@@ -627,26 +584,6 @@ class DanceAppGUI(QMainWindow):
         if self.pose_comparator:
             self.pose_comparator.close() 
         event.accept()
-
-    def toggle_mute(self):
-        if self.btn_mute.isChecked():
-            self.pose_comparator.media_player.setMuted(True)
-            self.btn_mute.setText("取消靜音")
-            print("已靜音")  # 除錯訊息
-        else:
-            self.pose_comparator.media_player.setMuted(False)
-            self.btn_mute.setText("靜音")
-            print("已取消靜音")  # 除錯訊息
-
-    def handle_media_error(self, error):
-        error_message = {
-            QMediaPlayer.ResourceError: "無法載入媒體資源",
-            QMediaPlayer.FormatError: "不支援的媒體格式",
-            QMediaPlayer.NetworkError: "網路錯誤",
-            QMediaPlayer.AccessDeniedError: "存取被拒絕"
-        }.get(error, f"未知錯誤: {error}")
-        
-        QMessageBox.warning(self, "音訊錯誤", f"播放音訊時發生錯誤：{error_message}")
 
 if __name__ == '__main__':
     try:
