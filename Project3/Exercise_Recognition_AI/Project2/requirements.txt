@@ -1,0 +1,8 @@
+opencv-python>=4.5.0
+numpy
+torch
+torchvision
+mediapipe
+joblib
+ultralytics
+PyQt5

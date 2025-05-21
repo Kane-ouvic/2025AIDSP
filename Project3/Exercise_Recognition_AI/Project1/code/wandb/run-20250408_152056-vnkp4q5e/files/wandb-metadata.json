@@ -1,0 +1,41 @@
+{
+  "os": "Linux-6.8.0-52-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-04-08T07:20:56.851062Z",
+  "program": "/home/ouvic/ML/Music_emo/2025AIDSP/code/train.py",
+  "codePath": "code/train.py",
+  "git": {
+    "remote": "https://github.com/Kane-ouvic/2025AIDSP.git",
+    "commit": "786879da0bb296a8696bcdf09dfe33051fd07b28"
+  },
+  "email": "ouvic215@gmail.com",
+  "root": "/home/ouvic/ML/Music_emo/2025AIDSP/code",
+  "host": "ncku-first",
+  "executable": "/home/ouvic/anaconda3/envs/pytorch_gpu2/bin/python",
+  "codePathLocal": "train.py",
+  "cpu_count": 32,
+  "cpu_count_logical": 64,
+  "gpu": "NVIDIA RTX A4000",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1888559353856",
+      "used": "1053861584896"
+    }
+  },
+  "memory": {
+    "total": "1081877159936"
+  },
+  "cpu": {
+    "count": 32,
+    "countLogical": 64
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA RTX A4000",
+      "memoryTotal": "16900227072",
+      "architecture": "Ampere"
+    }
+  ],
+  "cudaVersion": "11.4"
+}

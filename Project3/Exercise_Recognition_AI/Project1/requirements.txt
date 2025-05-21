@@ -1,0 +1,15 @@
+discord.py==2.3.2
+yt-dlp==2024.3.10
+PyQt5==5.15.10
+librosa==0.10.1
+numpy==1.24.3
+torch==2.0.1
+torchaudio==2.0.2
+sounddevice==0.4.6
+pyaudio==0.2.14
+matplotlib==3.7.5
+transformers==4.30.2
+soundfile==0.12.1
+PyNaCl==1.5.0
+ffmpeg-python==0.2.0
+openai==1.12.0 
