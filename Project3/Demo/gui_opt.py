@@ -30,23 +30,45 @@ class PoseComparator:
 
         self.mp_pose = mp.solutions.pose
         self.pose_detector = self.mp_pose.Pose(
-            static_image_mode=False,        # 處理影片影格
-            model_complexity=1,             # 模型複雜度
-            smooth_landmarks=True,          # 平滑關鍵點
-            min_detection_confidence=0.5,   # 最低偵測可信度
-            min_tracking_confidence=0.5     # 最低追蹤可信度
+            static_image_mode=False,        
+            model_complexity=1,             
+            smooth_landmarks=True,          
+            min_detection_confidence=0.5,   
+            min_tracking_confidence=0.5     
         )
         self.mp_drawing = mp.solutions.drawing_utils
         
-        self.reference_results_timeline = []  # 儲存參考影片的 MediaPipe results 物件
-        self.reference_frames = []
-        self.reference_keypoints_timeline = []
+        # 使用字典來儲存影格，以減少記憶體使用
+        self.reference_frames = {}
+        self.reference_keypoints_timeline = {}
+        self.reference_results_timeline = {}
         self.current_ref_frame_index = 0
         self.ref_video_path = None
+        self.total_frames = 0
 
         self.total_similarity_score = 0.0
         self.num_comparisons = 0
         self.is_reference_loaded = False
+        
+        # 記憶體管理參數
+        self.window_size = 300  # 滑動視窗大小
+        self.cleanup_threshold = 200  # 清理閾值
+
+    def _cleanup_old_frames(self, current_index):
+        """清理超出滑動視窗範圍的舊影格"""
+        start_idx = max(0, current_index - self.window_size)
+        end_idx = current_index + self.window_size
+        
+        # 清理超出範圍的影格
+        keys_to_remove = []
+        for idx in self.reference_frames.keys():
+            if idx < start_idx or idx > end_idx:
+                keys_to_remove.append(idx)
+        
+        for idx in keys_to_remove:
+            self.reference_frames.pop(idx, None)
+            self.reference_keypoints_timeline.pop(idx, None)
+            self.reference_results_timeline.pop(idx, None)
 
     def _extract_keypoints_from_results(self, results):
         """從 MediaPipe results 物件中提取關鍵點。"""
@@ -72,6 +94,7 @@ class PoseComparator:
         self.reference_keypoints_timeline.clear()
         self.reference_results_timeline.clear()
         self.is_reference_loaded = False
+        self.total_frames = 0
 
         cap_ref = cv2.VideoCapture(self.ref_video_path)
         if not cap_ref.isOpened():
@@ -85,28 +108,36 @@ class PoseComparator:
             if not ret:
                 break
             
-            self.reference_frames.append(frame.copy())
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image_rgb.flags.writeable = False  # 優化效能
-            results = self.pose_detector.process(image_rgb)
-            image_rgb.flags.writeable = True
-            
-            self.reference_results_timeline.append(results) # 儲存完整的 results 物件
-            keypoints = self._extract_keypoints_from_results(results)
-            self.reference_keypoints_timeline.append(keypoints)
+            # 只儲存當前視窗範圍內的影格
+            if frame_idx < self.window_size:
+                frame_copy = np.copy(frame)
+                self.reference_frames[frame_idx] = frame_copy
+                
+                image_rgb = cv2.cvtColor(frame_copy, cv2.COLOR_BGR2RGB)
+                image_rgb.flags.writeable = False
+                results = self.pose_detector.process(image_rgb)
+                image_rgb.flags.writeable = True
+                
+                self.reference_results_timeline[frame_idx] = results
+                keypoints = self._extract_keypoints_from_results(results)
+                self.reference_keypoints_timeline[frame_idx] = keypoints
             
             frame_idx += 1
-            # if frame_idx % 100 == 0: # Optional: progress update
-            #     print(f"已處理 {frame_idx} 個參考影格...")
+            if frame_idx % 100 == 0:
+                print(f"已處理 {frame_idx} 個參考影格...")
+                import gc
+                gc.collect()
 
         cap_ref.release()
+        self.total_frames = frame_idx
+        
         if not self.reference_frames:
             print("警告：參考影片為空或無法讀取。")
             return False
         
-        print(f"完成處理參考影片：共 {len(self.reference_frames)} 個影格。")
+        print(f"完成處理參考影片：共 {self.total_frames} 個影格。")
         self.is_reference_loaded = True
-        self.reset_comparison() # Reset stats for a new video
+        self.reset_comparison()
         return True
 
     def _resize_frame(self, frame, target_height=None, target_width=None):
@@ -143,76 +174,100 @@ class PoseComparator:
 
     def process_user_frame(self, frame_user, target_display_h):
         """處理單一使用者影格，與當前參考影格比較，並返回處理後的影格及相似度。"""
-        if not self.is_reference_loaded or self.current_ref_frame_index >= len(self.reference_frames):
-            # 若參考影片結束或未載入，返回原始使用者影格和空白參考影格
-            blank_ref_w = frame_user.shape[1] # Match width of user frame for blank
+        if not self.is_reference_loaded or self.current_ref_frame_index >= self.total_frames:
+            blank_ref_w = frame_user.shape[1]
             blank_ref = np.zeros((target_display_h, blank_ref_w, 3), dtype=np.uint8)
             
-            # Resize user frame if target_display_h is provided
             if target_display_h:
-                 frame_user_display = self._resize_frame(frame_user.copy(), target_height=target_display_h)
+                frame_user_display = self._resize_frame(np.copy(frame_user), target_height=target_display_h)
             else:
-                 frame_user_display = frame_user.copy()
-            return frame_user_display, blank_ref, 0.0, True # is_done = True
+                frame_user_display = np.copy(frame_user)
+            return frame_user_display, blank_ref, 0.0, True
 
-        frame_ref_original = self.reference_frames[self.current_ref_frame_index]
-        kps_ref_matrix = self.reference_keypoints_timeline[self.current_ref_frame_index]
+        try:
+            # 確保當前影格在記憶體中
+            if self.current_ref_frame_index not in self.reference_frames:
+                # 重新讀取需要的影格
+                cap_ref = cv2.VideoCapture(self.ref_video_path)
+                cap_ref.set(cv2.CAP_PROP_POS_FRAMES, self.current_ref_frame_index)
+                ret, frame = cap_ref.read()
+                if ret:
+                    frame_copy = np.copy(frame)
+                    self.reference_frames[self.current_ref_frame_index] = frame_copy
+                    
+                    image_rgb = cv2.cvtColor(frame_copy, cv2.COLOR_BGR2RGB)
+                    image_rgb.flags.writeable = False
+                    results = self.pose_detector.process(image_rgb)
+                    image_rgb.flags.writeable = True
+                    
+                    self.reference_results_timeline[self.current_ref_frame_index] = results
+                    keypoints = self._extract_keypoints_from_results(results)
+                    self.reference_keypoints_timeline[self.current_ref_frame_index] = keypoints
+                cap_ref.release()
 
-        # 調整使用者和參考影格大小以進行一致顯示
-        frame_user_display = self._resize_frame(frame_user.copy(), target_height=target_display_h)
-        frame_ref_display = self._resize_frame(frame_ref_original.copy(), target_height=target_display_h)
-        
-        # 處理使用者影格以獲取關鍵點 (使用原始 frame_user 進行偵測以獲得最佳精度)
-        image_user_rgb = cv2.cvtColor(frame_user, cv2.COLOR_BGR2RGB)
-        image_user_rgb.flags.writeable = False
-        results_user = self.pose_detector.process(image_user_rgb)
-        image_user_rgb.flags.writeable = True
-        kps_user_matrix = self._extract_keypoints_from_results(results_user)
+            frame_ref_original = np.copy(self.reference_frames[self.current_ref_frame_index])
+            kps_ref_matrix = self.reference_keypoints_timeline[self.current_ref_frame_index]
 
-        # 準備用於相似度計算的關鍵點
-        kps_user_flat = self._get_relevant_keypoints_for_similarity(kps_user_matrix)
-        kps_ref_flat = self._get_relevant_keypoints_for_similarity(kps_ref_matrix)
+            frame_user_display = self._resize_frame(np.copy(frame_user), target_height=target_display_h)
+            frame_ref_display = self._resize_frame(np.copy(frame_ref_original), target_height=target_display_h)
+            
+            image_user_rgb = cv2.cvtColor(frame_user, cv2.COLOR_BGR2RGB)
+            image_user_rgb.flags.writeable = False
+            results_user = self.pose_detector.process(image_user_rgb)
+            image_user_rgb.flags.writeable = True
+            kps_user_matrix = self._extract_keypoints_from_results(results_user)
 
-        # 計算相似度
-        current_similarity = 0.0
-        if not (np.all(kps_user_flat == 0) or np.all(kps_ref_flat == 0)): # 僅在兩者皆偵測到姿態時計算
-             current_similarity = self.calculate_similarity_score(kps_user_flat, kps_ref_flat)
-             self.total_similarity_score += current_similarity
-             self.num_comparisons += 1
-        
-        # --- 視覺化 (在調整大小後的顯示影格上繪製) ---
-        if results_user.pose_landmarks:
-            self.mp_drawing.draw_landmarks(
-                frame_user_display, results_user.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),
-                self.mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
-            )
+            kps_user_flat = self._get_relevant_keypoints_for_similarity(kps_user_matrix)
+            kps_ref_flat = self._get_relevant_keypoints_for_similarity(kps_ref_matrix)
 
-        ref_results_for_drawing = self.reference_results_timeline[self.current_ref_frame_index]
-        if ref_results_for_drawing and ref_results_for_drawing.pose_landmarks:
-            self.mp_drawing.draw_landmarks(
-                frame_ref_display, ref_results_for_drawing.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2), # 參考骨架用綠色
-                self.mp_drawing.DrawingSpec(color=(0, 128, 0), thickness=2, circle_radius=2)
-            )
-        
-        self.current_ref_frame_index += 1
-        is_done = self.current_ref_frame_index >= len(self.reference_frames)
-        
-        return frame_user_display, frame_ref_display, current_similarity, is_done
+            current_similarity = 0.0
+            if not (np.all(kps_user_flat == 0) or np.all(kps_ref_flat == 0)):
+                current_similarity = self.calculate_similarity_score(kps_user_flat, kps_ref_flat)
+                self.total_similarity_score += current_similarity
+                self.num_comparisons += 1
+
+            if results_user.pose_landmarks:
+                self.mp_drawing.draw_landmarks(
+                    frame_user_display, results_user.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
+                    self.mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),
+                    self.mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
+                )
+
+            ref_results_for_drawing = self.reference_results_timeline[self.current_ref_frame_index]
+            if ref_results_for_drawing and ref_results_for_drawing.pose_landmarks:
+                self.mp_drawing.draw_landmarks(
+                    frame_ref_display, ref_results_for_drawing.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
+                    self.mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                    self.mp_drawing.DrawingSpec(color=(0, 128, 0), thickness=2, circle_radius=2)
+                )
+
+            self.current_ref_frame_index += 1
+            is_done = self.current_ref_frame_index >= self.total_frames
+
+            # 清理舊影格
+            if self.current_ref_frame_index % self.cleanup_threshold == 0:
+                self._cleanup_old_frames(self.current_ref_frame_index)
+                import gc
+                gc.collect()
+
+            return frame_user_display, frame_ref_display, current_similarity, is_done
+
+        except Exception as e:
+            print(f"處理影格時發生錯誤: {e}")
+            return frame_user, np.zeros((target_display_h, frame_user.shape[1], 3), dtype=np.uint8), 0.0, True
 
     def get_reference_frame_count(self):
-        return len(self.reference_frames) if self.is_reference_loaded else 0
+        return self.total_frames if self.is_reference_loaded else 0
 
     def get_current_frame_num(self):
-        # Returns 1-based index for display, or total if done
-        return min(self.current_ref_frame_index, len(self.reference_frames)) if self.is_reference_loaded else 0
-
+        return min(self.current_ref_frame_index, self.total_frames) if self.is_reference_loaded else 0
 
     def reset_comparison(self):
         self.current_ref_frame_index = 0
         self.total_similarity_score = 0.0
         self.num_comparisons = 0
+        # 重新載入初始影格
+        self._cleanup_old_frames(0)
 
     def get_overall_similarity(self):
         if self.num_comparisons == 0:
@@ -233,8 +288,14 @@ class PoseComparator:
         return report
         
     def close(self):
+        """清理所有資源"""
         if self.pose_detector:
             self.pose_detector.close()
+        self.reference_frames.clear()
+        self.reference_keypoints_timeline.clear()
+        self.reference_results_timeline.clear()
+        import gc
+        gc.collect()
 
 
 class DanceAppGUI(QMainWindow):
