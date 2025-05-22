@@ -156,7 +156,7 @@ class ExerciseDecoder:
             with self.mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose_model:
                 for action_idx, action_name in enumerate(self.actions):
                     if self._stop_requested: break
-                    print(f"Preparing for {action_name}, Video #{sequence_num}")
+                    print(f"Preparing for {action_name}")
                     for i in range(3,0,-1): # Countdown
                         if self._stop_requested: break
                         ret_c, frame_c = cap.read()
