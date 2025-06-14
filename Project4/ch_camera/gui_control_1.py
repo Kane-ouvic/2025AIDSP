@@ -5,6 +5,9 @@ import logging
 from PIL import Image, ImageOps
 import numpy as np
 import mediapipe as mp
+import cv2
+from mediapipe.tasks.python import BaseOptions, vision
+from mediapipe.tasks.python.vision import ImageSegmenter
 from DeepCache.sd.pipeline_stable_diffusion import StableDiffusionPipeline as DeepCacheStableDiffusionPipeline
 from diffusers import StableDiffusionPipeline, StableDiffusionInpaintPipeline, StableDiffusionControlNetPipeline, ControlNetModel
 from controlnet_aux import OpenposeDetector
@@ -15,6 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- 全域模型變數 ---
 pipe_inpaint = None
 selfie_segmenter = None
+cloth_segmenter = None
 pipe_controlnet = None
 openpose_detector = None
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -30,6 +34,17 @@ def load_model(model_path, progress=gr.Progress(track_tqdm=True)):
     except Exception as e:
         logging.error(f"模型載入失敗: {e}")
         raise gr.Error(f"模型載入失敗，請檢查路徑或網路連線: {e}")
+
+def load_cloth_segmenter():
+    """Lazy-load Multi-class selfie segmentation 模型"""
+    global cloth_segmenter
+    if cloth_segmenter is None:
+        base = BaseOptions(model_asset_path="selfie_multiclass_256x256.tflite")
+        opts = vision.ImageSegmenterOptions(
+            base_options=base,
+            output_category_mask=True  # 我們只要類別索引圖
+        )
+        cloth_segmenter = ImageSegmenter.create_from_options(opts)
 
 def set_random_seed(seed):
     """設定隨機種子"""
@@ -79,7 +94,7 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     if snapshot is None:
         raise gr.Error("請先從攝影機拍攝一張照片。")
 
-    # 1. 載入模型 (若尚未載入)
+    # 1. 載入 Inpainting 模型 (若尚未載入)
     progress(0, desc="正在載入模型...")
     if pipe_inpaint is None:
         try:
@@ -91,14 +106,6 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
         except Exception as e:
             logging.error(f"Inpainting 模型載入失敗: {e}")
             raise gr.Error(f"模型載入失敗，請檢查網路連線: {e}")
-    
-    if selfie_segmenter is None:
-        try:
-            # 使用 model_selection=0 適用於一般近照，1 適用於風景照中的人物
-            selfie_segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=0)
-        except Exception as e:
-            logging.error(f"Mediapipe 載入失敗: {e}")
-            raise gr.Error(f"無法載入影像分割模型: {e}")
 
     progress(0.1, desc="準備生成...")
     # 2. 設定隨機種子
@@ -107,26 +114,58 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     generator = torch.Generator(device=device).manual_seed(int(seed))
 
     # 3. 使用 Mediapipe 進行影像分割以取得遮罩
-    progress(0.2, desc="正在進行影像分割...")
-    
-    # Mediapipe 需要 RGB 格式的 numpy array
     rgb_image = snapshot
-    results = selfie_segmenter.process(rgb_image)
-    
-    # 將 Mediapipe 的輸出 (0.0-1.0) 轉換為二元遮罩 (0 或 255)
-    mask_condition = results.segmentation_mask > 0.5
-    mask_np = np.where(mask_condition, 255, 0).astype(np.uint8)
-    mask_pil = Image.fromarray(mask_np)
 
-    if mask_choice == "遮罩人物":
-        mask_image = mask_pil
-    else:  # "遮罩背景"
-        mask_image = ImageOps.invert(mask_pil.convert('L'))
+    print(mask_choice)
+    
+    if mask_choice == "遮罩全身(保留頭)":
+        progress(0.25, desc="身體部位分割 (Mediapipe)...")
+        load_cloth_segmenter()  # This uses selfie_multiclass
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=snapshot)
+        result = cloth_segmenter.segment(mp_image)
+        category_mask = result.category_mask.numpy_view()
+
+        # 類別 2: body-skin, 類別 4: clothes.
+        body_mask = np.logical_or(category_mask == 2, category_mask == 4)
+        mask_np = body_mask.astype(np.uint8) * 255
+
+        # 膨脹遮罩以包含邊緣
+        mask_np = cv2.dilate(mask_np, np.ones((10, 10), np.uint8), iterations=1)
+        mask_image = Image.fromarray(mask_np)
+
+    elif mask_choice == "遮罩衣服":
+        progress(0.25, desc="衣服分割 (Mediapipe)...")
+        load_cloth_segmenter()
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=snapshot)
+        result = cloth_segmenter.segment(mp_image)
+        mask = result.category_mask.numpy_view()
+        mask_np = (mask == 4).astype(np.uint8) * 255
+        mask_image = Image.fromarray(mask_np).resize((512, 512))
+    else:
+        progress(0.2, desc="正在進行影像分割...")
+        if selfie_segmenter is None:
+            try:
+                selfie_segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=0)
+            except Exception as e:
+                logging.error(f"Mediapipe 載入失敗: {e}")
+                raise gr.Error(f"無法載入影像分割模型: {e}")
+        results = selfie_segmenter.process(rgb_image)
+        
+        # 將 Mediapipe 的輸出 (0.0-1.0) 轉換為二元遮罩 (0 或 255)
+        mask_condition = results.segmentation_mask > 0.5
+        mask_np = np.where(mask_condition, 255, 0).astype(np.uint8)
+        mask_pil = Image.fromarray(mask_np)
+
+        if mask_choice == "遮罩人物":
+            mask_image = mask_pil
+        else:  # "遮罩背景"
+            mask_image = ImageOps.invert(mask_pil.convert('L'))
 
     # 準備輸入 Inpainting 管線的圖片
     image_pil = Image.fromarray(snapshot)
     image = image_pil.resize((512, 512))
-    mask_image = mask_image.resize((512, 512))
+    # 確保遮罩圖大小正確，並儲存一份用於顯示
+    display_mask = mask_image.resize((512, 512))
 
     # 4. 執行 Inpainting
     progress(0.5, desc="正在執行 Inpainting...")
@@ -135,7 +174,7 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     output = pipe_inpaint(
         prompt=prompt,
         image=image,
-        mask_image=mask_image,
+        mask_image=display_mask, # 使用調整好大小的遮罩
         generator=generator,
         output_type='pil'
     ).images[0]
@@ -144,7 +183,7 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     logging.info(f"Inpainting 生成耗時: {use_time:.2f} 秒")
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
 
-    return output, info_text
+    return output, info_text, display_mask
 
 # --- 虛擬試衣函式 (ControlNet) ---
 def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
@@ -230,13 +269,14 @@ with gr.Blocks() as demo:
 
                     gr.Markdown("### 2. 設定並生成")
                     prompt_inpaint_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality, detailed photograph of a person in a futuristic city")
-                    mask_choice_input = gr.Radio(["遮罩背景", "遮罩人物"], label="遮罩選項 (Masking Option)", value="遮罩背景")
+                    mask_choice_input = gr.Radio(["遮罩背景", "遮罩人物", "遮罩衣服", "遮罩全身(保留頭)"], label="遮罩選項 (Masking Option)", value="遮罩背景")
                     inpaint_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
                     generate_inpaint_btn = gr.Button("生成圖片", variant="primary")
 
                 with gr.Column(scale=1):
                     gr.Markdown("### 3. 查看成果")
                     image_output_inpaint = gr.Image(label="生成結果")
+                    mask_output_inpaint = gr.Image(label="產生的遮罩")
                     info_output_inpaint = gr.Textbox(label="生成資訊")
 
         with gr.TabItem("虛擬換衣相機 (Virtual Try-on)"):
@@ -309,7 +349,7 @@ with gr.Blocks() as demo:
     generate_inpaint_btn.click(
         fn=generate_with_inpainting,
         inputs=[webcam_input, prompt_inpaint_input, mask_choice_input, inpaint_seed_input],
-        outputs=[image_output_inpaint, info_output_inpaint]
+        outputs=[image_output_inpaint, info_output_inpaint, mask_output_inpaint]
     )
 
     # Virtual Try-on Tab
