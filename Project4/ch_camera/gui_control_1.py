@@ -9,11 +9,8 @@ from DeepCache.sd.pipeline_stable_diffusion import StableDiffusionPipeline as De
 from diffusers import StableDiffusionPipeline, StableDiffusionInpaintPipeline, StableDiffusionControlNetPipeline, ControlNetModel
 from controlnet_aux import OpenposeDetector
 
-# 設定日誌，增加詳細資訊並設定為DEBUG等級
-logging.basicConfig(
-    level=logging.DEBUG, 
-    format='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s'
-)
+# 設定日誌
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- 全域模型變數 ---
 pipe_inpaint = None
@@ -151,7 +148,7 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
 
 # --- 虛擬試衣函式 (ControlNet) ---
 def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
-    """使用 ControlNet (OpenPose) 透過文字描述實現虛擬試衣"""
+    """使用 ControlNet (OpenPose) 實現虛擬試衣"""
     global pipe_controlnet, openpose_detector
 
     if person_image is None:
@@ -161,6 +158,7 @@ def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(trac
     progress(0, desc="正在載入 ControlNet 模型...")
     if openpose_detector is None:
         try:
+            # For better performance, you can move this model loading part to a separate function or on app start.
             openpose_detector = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
             logging.info("OpenPose Detector 載入成功。")
         except Exception as e:
@@ -169,7 +167,6 @@ def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(trac
 
     if pipe_controlnet is None:
         try:
-            logging.info("正在載入 ControlNet Pipeline...")
             controlnet = ControlNetModel.from_pretrained(
                 "lllyasviel/sd-controlnet-openpose",
                 torch_dtype=torch.float16
@@ -178,14 +175,9 @@ def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(trac
                 "runwayml/stable-diffusion-v1-5",
                 controlnet=controlnet,
                 torch_dtype=torch.float16,
-                safety_checker=None,
-                low_cpu_mem_usage=True # 啟用低CPU記憶體模式
-            )
-            # 啟用記憶體優化策略
-            pipe_controlnet.enable_sequential_cpu_offload()
-            pipe_controlnet.enable_attention_slicing()
+                safety_checker=None
+            ).to(device)
             logging.info("ControlNet Pipeline 載入成功。")
-
         except Exception as e:
             logging.error(f"ControlNet Pipeline 載入失敗: {e}")
             raise gr.Error(f"無法載入 SD+ControlNet 模型: {e}")
@@ -194,25 +186,19 @@ def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(trac
     # 2. 設定隨機種子
     if seed == -1:
         seed = torch.randint(0, 1000000, (1,)).item()
-    generator = torch.Generator(device="cpu").manual_seed(int(seed)) # 在CPU上生成隨機種子以穩定
+    generator = torch.Generator(device=device).manual_seed(int(seed))
 
     # 3. 使用 OpenPose 提取人體姿勢
     progress(0.3, desc="正在提取人體姿勢...")
-    logging.debug("開始進行 OpenPose 姿勢提取...")
     person_image_pil = Image.fromarray(person_image)
+    # The resolution can be adjusted based on input image quality and desired performance
     pose_image = openpose_detector(person_image_pil, detect_resolution=384, image_resolution=512)
-    logging.debug("OpenPose 姿勢提取完成。")
-    
-    # 為了節省記憶體，手動刪除不再需要的變數並清理快取
-    del person_image_pil
-    torch.cuda.empty_cache()
-    logging.debug("已清理姿勢提取後佔用的記憶體。")
     
     # 4. 執行 ControlNet Pipeline
     progress(0.5, desc="正在生成試衣圖片...")
-    logging.debug(f"開始執行 ControlNet Pipeline，共 {20} 個步驟。")
     start_time = time.time()
     
+    # Using a smaller number of inference steps for faster generation, can be increased for higher quality.
     output = pipe_controlnet(
         prompt,
         image=pose_image,
@@ -223,11 +209,7 @@ def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(trac
 
     use_time = time.time() - start_time
     logging.info(f"ControlNet 生成耗時: {use_time:.2f} 秒")
-    logging.debug("ControlNet Pipeline 執行完畢。")
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
-
-    # 主動釋放未使用的 VRAM
-    torch.cuda.empty_cache()
 
     return output, pose_image, info_text
 
@@ -259,11 +241,12 @@ with gr.Blocks() as demo:
 
         with gr.TabItem("虛擬換衣相機 (Virtual Try-on)"):
             gr.Markdown("### 使用 ControlNet + OpenPose 實現虛擬試衣")
-            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. 在提示詞中詳細描述您想試穿的衣服款式。\n3. 點擊生成！")
+            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. （可選）上傳一件衣服圖片作為參考。\n3. 在提示詞中詳細描述您想試穿的衣服款式。\n4. 點擊生成！")
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("#### 1. 輸入")
                     person_image_input = gr.Image(sources="webcam", label="拍攝人像", type="numpy", height=400)
+                    cloth_image_input = gr.Image(type="pil", label="上傳衣服圖片 (參考用)")
                     prompt_tryon_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality photo of a woman wearing a red dress, full body, standing in a showroom")
                     tryon_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
                     generate_tryon_btn = gr.Button("生成試穿圖片", variant="primary")
