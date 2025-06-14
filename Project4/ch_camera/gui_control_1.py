@@ -9,8 +9,11 @@ from DeepCache.sd.pipeline_stable_diffusion import StableDiffusionPipeline as De
 from diffusers import StableDiffusionPipeline, StableDiffusionInpaintPipeline, StableDiffusionControlNetPipeline, ControlNetModel
 from controlnet_aux import OpenposeDetector
 
-# 設定日誌
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 設定日誌，增加詳細資訊並設定為DEBUG等級
+logging.basicConfig(
+    level=logging.DEBUG, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s'
+)
 
 # --- 全域模型變數 ---
 pipe_inpaint = None
@@ -147,17 +150,15 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     return output, info_text
 
 # --- 虛擬試衣函式 (ControlNet) ---
-def generate_virtual_tryon(person_image, cloth_image, seed, progress=gr.Progress(track_tqdm=True)):
-    """使用 ControlNet (OpenPose) + IP-Adapter 實現虛擬試衣"""
+def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
+    """使用 ControlNet (OpenPose) 透過文字描述實現虛擬試衣"""
     global pipe_controlnet, openpose_detector
 
     if person_image is None:
         raise gr.Error("請先從攝影機拍攝一張人像照片。")
-    if cloth_image is None:
-        raise gr.Error("請上傳一張衣服的圖片。")
 
     # 1. 載入模型 (若尚未載入)
-    progress(0, desc="正在載入 ControlNet & IP-Adapter 模型...")
+    progress(0, desc="正在載入 ControlNet 模型...")
     if openpose_detector is None:
         try:
             openpose_detector = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
@@ -177,55 +178,52 @@ def generate_virtual_tryon(person_image, cloth_image, seed, progress=gr.Progress
                 "runwayml/stable-diffusion-v1-5",
                 controlnet=controlnet,
                 torch_dtype=torch.float16,
-                safety_checker=None
+                safety_checker=None,
+                low_cpu_mem_usage=True # 啟用低CPU記憶體模式
             )
-            # 啟用更積極的記憶體優化策略，以應對VRAM不足
+            # 啟用記憶體優化策略
             pipe_controlnet.enable_sequential_cpu_offload()
             pipe_controlnet.enable_attention_slicing()
-            
-            # 載入 IP-Adapter
-            logging.info("正在將 IP-Adapter 載入 Pipeline...")
-            pipe_controlnet.load_ip_adapter("h94/IP-Adapter", subfolder="models", weight_name="ip-adapter_sd15.bin")
-            logging.info("ControlNet + IP-Adapter Pipeline 載入成功。")
+            logging.info("ControlNet Pipeline 載入成功。")
 
         except Exception as e:
-            logging.error(f"ControlNet Pipeline 或 IP-Adapter 載入失敗: {e}")
-            raise gr.Error(f"無法載入 SD+ControlNet+IP-Adapter 模型: {e}")
+            logging.error(f"ControlNet Pipeline 載入失敗: {e}")
+            raise gr.Error(f"無法載入 SD+ControlNet 模型: {e}")
 
     progress(0.2, desc="準備生成...")
     # 2. 設定隨機種子
     if seed == -1:
         seed = torch.randint(0, 1000000, (1,)).item()
-    generator = torch.Generator(device=device).manual_seed(int(seed))
+    generator = torch.Generator(device="cpu").manual_seed(int(seed)) # 在CPU上生成隨機種子以穩定
 
     # 3. 使用 OpenPose 提取人體姿勢
     progress(0.3, desc="正在提取人體姿勢...")
+    logging.debug("開始進行 OpenPose 姿勢提取...")
     person_image_pil = Image.fromarray(person_image)
     pose_image = openpose_detector(person_image_pil, detect_resolution=384, image_resolution=512)
+    logging.debug("OpenPose 姿勢提取完成。")
     
-    # 4. 執行 ControlNet + IP-Adapter Pipeline
+    # 為了節省記憶體，手動刪除不再需要的變數並清理快取
+    del person_image_pil
+    torch.cuda.empty_cache()
+    logging.debug("已清理姿勢提取後佔用的記憶體。")
+    
+    # 4. 執行 ControlNet Pipeline
     progress(0.5, desc="正在生成試衣圖片...")
+    logging.debug(f"開始執行 ControlNet Pipeline，共 {20} 個步驟。")
     start_time = time.time()
     
-    # 設定 IP-Adapter 的權重
-    pipe_controlnet.set_ip_adapter_scale(0.7)
-
-    # IP-Adapter 搭配 ControlNet 時，需要一個基本的提示詞來引導
-    prompt = "a photo of a person wearing the clothes, best quality, high quality"
-    negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality"
-
     output = pipe_controlnet(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        image=pose_image, # ControlNet input
-        ip_adapter_image=cloth_image, # IP-Adapter input
+        prompt,
+        image=pose_image,
         generator=generator,
-        num_inference_steps=30, 
+        num_inference_steps=20, 
         output_type='pil'
     ).images[0]
 
     use_time = time.time() - start_time
-    logging.info(f"ControlNet+IP-Adapter 生成耗時: {use_time:.2f} 秒")
+    logging.info(f"ControlNet 生成耗時: {use_time:.2f} 秒")
+    logging.debug("ControlNet Pipeline 執行完畢。")
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
 
     # 主動釋放未使用的 VRAM
@@ -260,13 +258,13 @@ with gr.Blocks() as demo:
                     info_output_inpaint = gr.Textbox(label="生成資訊")
 
         with gr.TabItem("虛擬換衣相機 (Virtual Try-on)"):
-            gr.Markdown("### 使用 ControlNet + IP-Adapter 實現虛擬試衣")
-            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. 上傳一件衣服的圖片。\n3. 點擊生成！模型將會參考衣服圖片為您生成試穿效果。")
+            gr.Markdown("### 使用 ControlNet + OpenPose 實現虛擬試衣")
+            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. 在提示詞中詳細描述您想試穿的衣服款式。\n3. 點擊生成！")
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("#### 1. 輸入")
                     person_image_input = gr.Image(sources="webcam", label="拍攝人像", type="numpy", height=400)
-                    cloth_image_input = gr.Image(type="pil", label="上傳衣服圖片 (必要)")
+                    prompt_tryon_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality photo of a woman wearing a red dress, full body, standing in a showroom")
                     tryon_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
                     generate_tryon_btn = gr.Button("生成試穿圖片", variant="primary")
                 
@@ -334,7 +332,7 @@ with gr.Blocks() as demo:
     # Virtual Try-on Tab
     generate_tryon_btn.click(
         fn=generate_virtual_tryon,
-        inputs=[person_image_input, cloth_image_input, tryon_seed_input],
+        inputs=[person_image_input, prompt_tryon_input, tryon_seed_input],
         outputs=[image_output_tryon, pose_image_output, info_output_tryon]
     )
 
