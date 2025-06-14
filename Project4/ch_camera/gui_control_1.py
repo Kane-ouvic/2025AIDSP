@@ -19,6 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 pipe_inpaint = None
 selfie_segmenter = None
 cloth_segmenter = None
+face_detector = None
 pipe_controlnet = None
 openpose_detector = None
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -45,6 +46,19 @@ def load_cloth_segmenter():
             output_category_mask=True  # 我們只要類別索引圖
         )
         cloth_segmenter = ImageSegmenter.create_from_options(opts)
+
+def load_face_detector():
+    """Lazy-load FaceDetection model"""
+    global face_detector
+    if face_detector is None:
+        logging.info("正在載入 FaceDetection 模型...")
+        try:
+            face_detector = mp.solutions.face_detection.FaceDetection(
+                model_selection=0, min_detection_confidence=0.5)
+            logging.info("FaceDetection 模型載入成功。")
+        except Exception as e:
+            logging.error(f"FaceDetection 模型載入失敗: {e}")
+            raise gr.Error(f"無法載入人臉偵測模型: {e}")
 
 def set_random_seed(seed):
     """設定隨機種子"""
@@ -89,12 +103,12 @@ def generate_with_deepcache(pipe, prompt, height, width, seed, cache_interval, p
 # --- 圖片生成函式 (Inpainting) ---
 def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Progress(track_tqdm=True)):
     """使用 Inpainting 模型及 Mediapipe 遮罩來生成圖片"""
-    global pipe_inpaint, selfie_segmenter
+    global pipe_inpaint, selfie_segmenter, face_detector
 
     if snapshot is None:
         raise gr.Error("請先從攝影機拍攝一張照片。")
 
-    # 1. 載入 Inpainting 模型 (若尚未載入)
+    # 1. 載入模型 (若尚未載入)
     progress(0, desc="正在載入模型...")
     if pipe_inpaint is None:
         try:
@@ -106,6 +120,14 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
         except Exception as e:
             logging.error(f"Inpainting 模型載入失敗: {e}")
             raise gr.Error(f"模型載入失敗，請檢查網路連線: {e}")
+    
+    if selfie_segmenter is None:
+        try:
+            # 使用 model_selection=0 適用於一般近照，1 適用於風景照中的人物
+            selfie_segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=0)
+        except Exception as e:
+            logging.error(f"Mediapipe 載入失敗: {e}")
+            raise gr.Error(f"無法載入影像分割模型: {e}")
 
     progress(0.1, desc="準備生成...")
     # 2. 設定隨機種子
@@ -114,23 +136,42 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     generator = torch.Generator(device=device).manual_seed(int(seed))
 
     # 3. 使用 Mediapipe 進行影像分割以取得遮罩
+    progress(0.2, desc="正在進行影像分割...")
+    
+    # Mediapipe 需要 RGB 格式的 numpy array
     rgb_image = snapshot
 
     print(mask_choice)
     
     if mask_choice == "遮罩全身(保留頭)":
-        progress(0.25, desc="身體部位分割 (Mediapipe)...")
-        load_cloth_segmenter()  # This uses selfie_multiclass
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=snapshot)
-        result = cloth_segmenter.segment(mp_image)
-        category_mask = result.category_mask.numpy_view()
+        progress(0.25, desc="SelfieSegmentation 取人物...")
+        # 1. 整人二元遮罩
+        seg_result = selfie_segmenter.process(snapshot)
+        mask_np = (seg_result.segmentation_mask > 0.5).astype(np.uint8) * 255
 
-        # 類別 2: body-skin, 類別 4: clothes.
-        body_mask = np.logical_or(category_mask == 2, category_mask == 4)
-        mask_np = body_mask.astype(np.uint8) * 255
+        # 2. 找人臉框
+        progress(0.35, desc="FaceDetection 擷取頭部...")
+        load_face_detector()
+        bgr = cv2.cvtColor(snapshot, cv2.COLOR_RGB2BGR)
+        fd_result = face_detector.process(bgr)
+        if not fd_result.detections:
+            raise gr.Error("未偵測到人臉，請調整角度/光線再試。")
 
-        # 膨脹遮罩以包含邊緣
-        mask_np = cv2.dilate(mask_np, np.ones((10, 10), np.uint8), iterations=1)
+        # 3. 把最大人臉 bbox 當「頭」，多放大一些確保髮型
+        h, w, _ = snapshot.shape
+        det = max(fd_result.detections, key=lambda d: d.location_data.relative_bounding_box.width)
+        rb = det.location_data.relative_bounding_box
+        # 轉絕對座標並放大
+        x0 = max(int((rb.xmin - 0.15*rb.width)  * w), 0)
+        y0 = max(int((rb.ymin - 0.15*rb.height) * h), 0)
+        x1 = min(int((rb.xmin + rb.width*1.15) * w), w)
+        y1 = min(int((rb.ymin + rb.height*1.3) * h), h)
+
+        # 4. 將頭部區域清零 → 只留身體
+        mask_np[y0:y1, x0:x1] = 0
+
+        # 5. (可選) 膨脹身體遮罩，避免邊緣殘留
+        mask_np = cv2.dilate(mask_np, np.ones((10,10), np.uint8), iterations=1)
         mask_image = Image.fromarray(mask_np)
 
     elif mask_choice == "遮罩衣服":
@@ -143,12 +184,6 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
         mask_image = Image.fromarray(mask_np).resize((512, 512))
     else:
         progress(0.2, desc="正在進行影像分割...")
-        if selfie_segmenter is None:
-            try:
-                selfie_segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=0)
-            except Exception as e:
-                logging.error(f"Mediapipe 載入失敗: {e}")
-                raise gr.Error(f"無法載入影像分割模型: {e}")
         results = selfie_segmenter.process(rgb_image)
         
         # 將 Mediapipe 的輸出 (0.0-1.0) 轉換為二元遮罩 (0 或 255)
