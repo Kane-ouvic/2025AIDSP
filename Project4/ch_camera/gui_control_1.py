@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- 全域模型變數 ---
 pipe_inpaint = None
 selfie_segmenter = None
-cloth_segmenter = None
 face_detector = None
 pipe_controlnet = None
 openpose_detector = None
@@ -35,17 +34,6 @@ def load_model(model_path, progress=gr.Progress(track_tqdm=True)):
     except Exception as e:
         logging.error(f"模型載入失敗: {e}")
         raise gr.Error(f"模型載入失敗，請檢查路徑或網路連線: {e}")
-
-def load_cloth_segmenter():
-    """Lazy-load Multi-class selfie segmentation 模型"""
-    global cloth_segmenter
-    if cloth_segmenter is None:
-        base = BaseOptions(model_asset_path="selfie_multiclass_256x256.tflite")
-        opts = vision.ImageSegmenterOptions(
-            base_options=base,
-            output_category_mask=True  # 我們只要類別索引圖
-        )
-        cloth_segmenter = ImageSegmenter.create_from_options(opts)
 
 def load_face_detector():
     """Lazy-load FaceDetection model"""
@@ -174,14 +162,6 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
         mask_np = cv2.dilate(mask_np, np.ones((10,10), np.uint8), iterations=1)
         mask_image = Image.fromarray(mask_np)
 
-    elif mask_choice == "遮罩衣服":
-        progress(0.25, desc="衣服分割 (Mediapipe)...")
-        load_cloth_segmenter()
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=snapshot)
-        result = cloth_segmenter.segment(mp_image)
-        mask = result.category_mask.numpy_view()
-        mask_np = (mask == 4).astype(np.uint8) * 255
-        mask_image = Image.fromarray(mask_np).resize((512, 512))
     else:
         progress(0.2, desc="正在進行影像分割...")
         results = selfie_segmenter.process(rgb_image)
@@ -220,9 +200,9 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
 
     return output, info_text, display_mask
 
-# --- 虛擬試衣函式 (ControlNet) ---
-def generate_virtual_tryon(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
-    """使用 ControlNet (OpenPose) 實現虛擬試衣"""
+# --- 骨架控制生成函式 (ControlNet) ---
+def generate_with_openpose(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
+    """使用 ControlNet (OpenPose) 實現骨架控制生成"""
     global pipe_controlnet, openpose_detector
 
     if person_image is None:
@@ -304,7 +284,7 @@ with gr.Blocks() as demo:
 
                     gr.Markdown("### 2. 設定並生成")
                     prompt_inpaint_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality, detailed photograph of a person in a futuristic city")
-                    mask_choice_input = gr.Radio(["遮罩背景", "遮罩人物", "遮罩衣服", "遮罩全身(保留頭)"], label="遮罩選項 (Masking Option)", value="遮罩背景")
+                    mask_choice_input = gr.Radio(["遮罩背景", "遮罩人物", "遮罩全身(保留頭)"], label="遮罩選項 (Masking Option)", value="遮罩背景")
                     inpaint_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
                     generate_inpaint_btn = gr.Button("生成圖片", variant="primary")
 
@@ -314,23 +294,22 @@ with gr.Blocks() as demo:
                     mask_output_inpaint = gr.Image(label="產生的遮罩")
                     info_output_inpaint = gr.Textbox(label="生成資訊")
 
-        with gr.TabItem("虛擬換衣相機 (Virtual Try-on)"):
-            gr.Markdown("### 使用 ControlNet + OpenPose 實現虛擬試衣")
-            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. （可選）上傳一件衣服圖片作為參考。\n3. 在提示詞中詳細描述您想試穿的衣服款式。\n4. 點擊生成！")
+        with gr.TabItem("骨架控制生成 (Pose Control)"):
+            gr.Markdown("### 使用 ControlNet + OpenPose 進行骨架控制生成")
+            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. 在提示詞中詳細描述您想生成的場景與人物。\n3. 點擊生成！")
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("#### 1. 輸入")
-                    person_image_input = gr.Image(sources="webcam", label="拍攝人像", type="numpy", height=400)
-                    cloth_image_input = gr.Image(type="pil", label="上傳衣服圖片 (參考用)")
-                    prompt_tryon_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality photo of a woman wearing a red dress, full body, standing in a showroom")
-                    tryon_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
-                    generate_tryon_btn = gr.Button("生成試穿圖片", variant="primary")
+                    pose_person_image_input = gr.Image(sources="webcam", label="拍攝人像", type="numpy", height=400)
+                    prompt_openpose_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality photo of a woman wearing a red dress, full body, standing in a showroom")
+                    openpose_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
+                    generate_openpose_btn = gr.Button("生成圖片", variant="primary")
                 
                 with gr.Column(scale=1):
                     gr.Markdown("#### 2. 結果")
-                    image_output_tryon = gr.Image(label="生成結果", height=400)
+                    image_output_openpose = gr.Image(label="生成結果", height=400)
                     pose_image_output = gr.Image(label="偵測到的人體姿勢 (ControlNet Input)")
-                    info_output_tryon = gr.Textbox(label="生成資訊")
+                    info_output_openpose = gr.Textbox(label="生成資訊")
 
         with gr.TabItem("文字生成圖片 (DeepCache)"):
             with gr.Row():
@@ -387,11 +366,11 @@ with gr.Blocks() as demo:
         outputs=[image_output_inpaint, info_output_inpaint, mask_output_inpaint]
     )
 
-    # Virtual Try-on Tab
-    generate_tryon_btn.click(
-        fn=generate_virtual_tryon,
-        inputs=[person_image_input, prompt_tryon_input, tryon_seed_input],
-        outputs=[image_output_tryon, pose_image_output, info_output_tryon]
+    # Pose Control Tab
+    generate_openpose_btn.click(
+        fn=generate_with_openpose,
+        inputs=[pose_person_image_input, prompt_openpose_input, openpose_seed_input],
+        outputs=[image_output_openpose, pose_image_output, info_output_openpose]
     )
 
 if __name__ == "__main__":
