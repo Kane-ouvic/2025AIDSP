@@ -278,9 +278,9 @@ with gr.Blocks() as demo:
         with gr.TabItem("攝影機智慧修補 (Webcam Inpainting)"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    gr.Markdown("### 1. 拍攝照片")
-                    webcam_input = gr.Image(sources="webcam", label="輸入畫面", type="numpy")
-                    gr.Markdown("點擊上方區域開啟相機拍照，照片會顯示於此。")
+                    gr.Markdown("### 1. 輸入影像")
+                    webcam_input = gr.Image(sources=["webcam", "upload"], label="輸入畫面", type="numpy")
+                    gr.Markdown("可使用攝影機拍照或直接上傳圖片。")
 
                     gr.Markdown("### 2. 設定並生成")
                     prompt_inpaint_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality, detailed photograph of a person in a futuristic city")
@@ -296,11 +296,11 @@ with gr.Blocks() as demo:
 
         with gr.TabItem("骨架控制生成 (Pose Control)"):
             gr.Markdown("### 使用 ControlNet + OpenPose 進行骨架控制生成")
-            gr.Markdown("1. 拍攝一張包含完整人體的照片。\n2. 在提示詞中詳細描述您想生成的場景與人物。\n3. 點擊生成！")
+            gr.Markdown("1. 拍攝或上傳一張包含完整人體的照片。\n2. 在提示詞中詳細描述您想生成的場景與人物。\n3. 點擊生成！")
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("#### 1. 輸入")
-                    pose_person_image_input = gr.Image(sources="webcam", label="拍攝人像", type="numpy", height=400)
+                    pose_person_image_input = gr.Image(sources=["webcam", "upload"], label="拍攝/上傳人像", type="numpy", height=400)
                     prompt_openpose_input = gr.Textbox(label="提示詞 (Prompt)", value="a high-quality photo of a woman wearing a red dress, full body, standing in a showroom")
                     openpose_seed_input = gr.Number(label="種子 (Seed)", value=42, precision=0, info="-1 代表隨機")
                     generate_openpose_btn = gr.Button("生成圖片", variant="primary")
