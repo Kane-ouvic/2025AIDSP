@@ -23,9 +23,46 @@ pipe_controlnet = None
 openpose_detector = None
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
+def manage_pipeline_memory(keep_pipeline: str, pipe_deepcache_state: gr.State, progress: gr.Progress):
+    """
+    管理VRAM，確保一次只有一個主要pipeline在GPU上。
+    會修改全域變數和傳入的Gradio State。
+    """
+    global pipe_inpaint, pipe_controlnet
+    pipeline_unloaded = False
+
+    progress(0, desc="正在檢查並釋放記憶體...")
+
+    # 卸載 Inpainting pipeline
+    if keep_pipeline != "inpainting" and pipe_inpaint is not None:
+        logging.info("正在從VRAM卸載Inpainting模型...")
+        pipe_inpaint = None
+        pipeline_unloaded = True
+
+    # 卸載 ControlNet pipeline
+    if keep_pipeline != "controlnet" and pipe_controlnet is not None:
+        logging.info("正在從VRAM卸載ControlNet模型...")
+        pipe_controlnet = None
+        pipeline_unloaded = True
+    
+    # 卸載 DeepCache pipeline (儲存在Gradio State中)
+    if keep_pipeline != "deepcache" and pipe_deepcache_state is not None:
+        logging.info("正在從VRAM卸載DeepCache模型...")
+        pipe_deepcache_state = None  # 將State中的模型設為None
+        pipeline_unloaded = True
+
+    if pipeline_unloaded:
+        torch.cuda.empty_cache()
+        logging.info("VRAM快取已清除。")
+    
+    return pipe_deepcache_state
+
 def load_model(model_path, progress=gr.Progress(track_tqdm=True)):
-    """從指定路徑載入模型"""
-    progress(0, desc="正在載入模型...")
+    """從指定路徑載入模型，並在此之前卸載其他模型"""
+    # 在載入新模型前，清除其他所有模型
+    manage_pipeline_memory(keep_pipeline="deepcache", pipe_deepcache_state=None, progress=progress)
+    
+    progress(0.2, desc="正在載入模型...")
     try:
         pipe = DeepCacheStableDiffusionPipeline.from_pretrained(model_path, torch_dtype=torch.float16).to("cuda:0")
         logging.info(f"從 '{model_path}' 載入模型成功。")
@@ -56,6 +93,10 @@ def set_random_seed(seed):
 # --- 圖片生成函式 (DeepCache) ---
 def generate_with_deepcache(pipe, prompt, height, width, seed, cache_interval, pow_val, center_val, progress=gr.Progress(track_tqdm=True)):
     """根據輸入參數使用 DeepCache 生成圖片"""
+    # 在執行生成前，先呼叫記憶體管理，確保其他大型模型已被卸載
+    # 注意：此處我們傳遞 pipe 本身作為 state，因為這是函式收到的值
+    manage_pipeline_memory(keep_pipeline="deepcache", pipe_deepcache_state=pipe, progress=progress)
+
     if pipe is None:
         raise gr.Error("請先載入 DeepCache 模型。")
 
@@ -86,18 +127,25 @@ def generate_with_deepcache(pipe, prompt, height, width, seed, cache_interval, p
     
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
     
-    return output, info_text
+    return output, info_text, pipe
 
 # --- 圖片生成函式 (Inpainting) ---
-def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Progress(track_tqdm=True)):
+def generate_with_inpainting(snapshot, prompt, mask_choice, seed, pipe_deepcache_state, progress=gr.Progress(track_tqdm=True)):
     """使用 Inpainting 模型及 Mediapipe 遮罩來生成圖片"""
     global pipe_inpaint, selfie_segmenter, face_detector
+
+    # 1. 管理記憶體：保留Inpainting，卸載其他
+    pipe_deepcache_state = manage_pipeline_memory(
+        keep_pipeline="inpainting",
+        pipe_deepcache_state=pipe_deepcache_state,
+        progress=progress
+    )
 
     if snapshot is None:
         raise gr.Error("請先從攝影機拍攝一張照片。")
 
-    # 1. 載入模型 (若尚未載入)
-    progress(0, desc="正在載入模型...")
+    # 2. 載入模型 (若尚未載入)
+    progress(0.1, desc="正在載入Inpainting模型...")
     if pipe_inpaint is None:
         try:
             pipe_inpaint = StableDiffusionInpaintPipeline.from_pretrained(
@@ -117,7 +165,7 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
             logging.error(f"Mediapipe 載入失敗: {e}")
             raise gr.Error(f"無法載入影像分割模型: {e}")
 
-    progress(0.1, desc="準備生成...")
+    progress(0.2, desc="準備生成...")
     # 2. 設定隨機種子
     if seed == -1:
         seed = torch.randint(0, 1000000, (1,)).item()
@@ -198,18 +246,25 @@ def generate_with_inpainting(snapshot, prompt, mask_choice, seed, progress=gr.Pr
     logging.info(f"Inpainting 生成耗時: {use_time:.2f} 秒")
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
 
-    return output, info_text, display_mask
+    return output, info_text, display_mask, pipe_deepcache_state
 
 # --- 骨架控制生成函式 (ControlNet) ---
-def generate_with_openpose(person_image, prompt, seed, progress=gr.Progress(track_tqdm=True)):
+def generate_with_openpose(person_image, prompt, seed, pipe_deepcache_state, progress=gr.Progress(track_tqdm=True)):
     """使用 ControlNet (OpenPose) 實現骨架控制生成"""
     global pipe_controlnet, openpose_detector
+
+    # 1. 管理記憶體：保留ControlNet，卸載其他
+    pipe_deepcache_state = manage_pipeline_memory(
+        keep_pipeline="controlnet",
+        pipe_deepcache_state=pipe_deepcache_state,
+        progress=progress
+    )
 
     if person_image is None:
         raise gr.Error("請先從攝影機拍攝一張人像照片。")
 
-    # 1. 載入模型 (若尚未載入)
-    progress(0, desc="正在載入 ControlNet 模型...")
+    # 2. 載入模型 (若尚未載入)
+    progress(0.1, desc="正在載入 ControlNet 模型...")
     if openpose_detector is None:
         try:
             # For better performance, you can move this model loading part to a separate function or on app start.
@@ -265,7 +320,7 @@ def generate_with_openpose(person_image, prompt, seed, progress=gr.Progress(trac
     logging.info(f"ControlNet 生成耗時: {use_time:.2f} 秒")
     info_text = f"Seed: {int(seed)}\n耗時: {use_time:.2f} 秒"
 
-    return output, pose_image, info_text
+    return output, pose_image, info_text, pipe_deepcache_state
 
 # --- Gradio 介面 ---
 with gr.Blocks() as demo:
@@ -356,22 +411,22 @@ with gr.Blocks() as demo:
             prompt_deepcache_input, height_input, width_input, seed_input, 
             cache_interval_input, pow_val_input, center_val_input
         ],
-        outputs=[image_output_deepcache, info_output_deepcache]
+        outputs=[image_output_deepcache, info_output_deepcache, pipe_state]
     )
 
     # Inpainting Tab
     generate_inpaint_btn.click(
         fn=generate_with_inpainting,
-        inputs=[webcam_input, prompt_inpaint_input, mask_choice_input, inpaint_seed_input],
-        outputs=[image_output_inpaint, info_output_inpaint, mask_output_inpaint]
+        inputs=[webcam_input, prompt_inpaint_input, mask_choice_input, inpaint_seed_input, pipe_state],
+        outputs=[image_output_inpaint, info_output_inpaint, mask_output_inpaint, pipe_state]
     )
 
     # Pose Control Tab
     generate_openpose_btn.click(
         fn=generate_with_openpose,
-        inputs=[pose_person_image_input, prompt_openpose_input, openpose_seed_input],
-        outputs=[image_output_openpose, pose_image_output, info_output_openpose]
+        inputs=[pose_person_image_input, prompt_openpose_input, openpose_seed_input, pipe_state],
+        outputs=[image_output_openpose, pose_image_output, info_output_openpose, pipe_state]
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name='0.0.0.0', server_port=7860, share=True)
